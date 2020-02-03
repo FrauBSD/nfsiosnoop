@@ -1,0 +1,611 @@
+#!/bin/sh
+# vi: set ft=sh noet ts=8 sw=8 :: Vi/ViM
+############################################################ IDENT(1)
+#
+# $Title: Script to snoop on NFS I/O under Linux $
+# $Copyright: 2020 Devin Teske. All rights reserved. $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-03 11:18:15 -0800 freebsdfrau $
+#
+############################################################ ENVIRONMENT
+
+: "${USER:=$( id -nu )}" # Used to determine whether sudo(8) should be used
+
+############################################################ DEFAULTS
+
+DEFAULT_TIME_FMT="%Y %b %e %T"
+
+############################################################ GLOBALS
+
+VERSION='$Version: 3.0 $'
+
+pgm="${0##*/}" # Program basename
+
+#
+# Global exit status
+#
+SUCCESS=0
+FAILURE=1
+
+#
+# Command-line options
+#
+DEBUG=				# -d
+QUIET=				# -q
+RAW_OUTPUT=			# -r
+TIME_FMT="$DEFAULT_TIME_FMT"	# -t fmt
+FILTER_GROUP=			# -g group
+FILTER_USER=			# -u user
+VERBOSE=			# -v
+
+#
+# Miscellaneous
+#
+COMM=
+CONS=1
+[ -t 1 ] || CONS= # stdout is not a tty
+FILTER_GID=
+FILTER_UID=
+RAW_TIME_FMT='"%s"'
+
+############################################################ FUNCTIONS
+
+if [ "$CONS" ]; then
+info(){ printf "\033[35mINFO\033[39m %s\n" "$*" >&2; }
+else
+info(){ printf "INFO %s\n" "$*" >&2; }
+fi
+
+usage()
+{
+	local optfmt="\t%-11s %s\n"
+	exec >&2
+	printf "Usage: %s [OPTIONS] [comm]\n" "$pgm"
+	printf "Options:\n"
+	printf "$optfmt" "-d" "Debug. Print script and exit."
+	printf "$optfmt" "-h" "Print usage statement and exit."
+	printf "$optfmt" "-q" "Quiet. Hide dup*, open/close, and null r/w."
+	printf "$optfmt" "-r" "Show unformatted raw output."
+	printf "$optfmt" "-t fmt" "Time format. Default \`$DEFAULT_TIME_FMT'."
+	printf "$optfmt" "-u user" "Filter on user. Can be name or UID."
+	printf "$optfmt" "-g group" "Filter on group. Can be name or GID."
+	printf "$optfmt" "-V" "Print version and exit."
+	printf "$optfmt" "-v" "Verbose. Show filenames and hidden tracepoints."
+	exit $FAILURE
+}
+
+lsofN()
+{
+	[ "$DEBUG" ] && return
+
+	case "$USER" in
+	root) lsof -N +c 0 ;;
+	*) sudo lsof -N +c 0
+	esac
+}
+
+run()
+{
+	if [ "$DEBUG" ]; then
+		cat
+		return
+	fi
+
+	case "$USER" in
+	root) bpftrace -B none /dev/stdin "$@" ;;
+	*) sudo bpftrace -B none /dev/stdin "$@"
+	esac
+}
+
+############################################################ MAIN
+
+#
+# Process command-line options
+#
+while getopts dg:hqrt:u:Vv flag; do
+	case "$flag" in
+	d) DEBUG=1 ;;
+	g) FILTER_GROUP="$OPTARG" ;;
+	q) QUIET=1 ;;
+	r) RAW_OUTPUT=1 ;;
+	t) TIME_FMT="$OPTARG" ;;
+	u) FILTER_USER="$OPTARG" ;;
+	V) VERSION="${VERSION#*: }"
+		echo "${VERSION% $}"
+		exit $SUCCESS ;;
+	v) VERBOSE=1 ;;
+	*) usage # NOTREACHED
+	esac
+done
+shift $(( $OPTIND - 1 ))
+
+#
+# Process command-line arguments
+#
+COMM="$1"
+
+#
+# Process user/group options
+#
+case "$FILTER_USER" in
+"") : leave-empty ;;
+*[!0-9]*) # Translate from name to UID
+	FILTER_UID=$(
+		getent passwd "$FILTER_USER" | awk -F: '{print $3}'
+	) || exit
+	;;
+*) # Translate from UID to name
+	FILTER_UID=$FILTER_USER
+	FILTER_USER=$(
+		getent passwd $FILTER_UID | awk -F: '{print $1}'
+	) || exit
+esac
+case "$FILTER_GROUP" in
+"") : leave-empty ;;
+*[!0-9]*) # Translate from name to GID
+	FILTER_GID=$( 
+		getent group "$FILTER_GROUP" | awk -F: '{print $3}'
+	) || exit
+	;;
+*) # Translate from GID to name
+	FILTER_GID=$FILTER_GROUP
+	FILTER_GROUP=$(
+		getent group $FILTER_GID | awk -F '{print $1}'
+	) || exit
+esac
+
+#
+# Inform the user what we are doing
+#
+[ "$DEBUG" ] || info "Tracing NFS... Hit Ctrl-C to end."
+
+#
+# Run script
+# NB: M-x package-install [RET] dtrace-script-mode [RET]
+#
+{
+	# List current open connections
+	lsofN | awk \
+		-v filter_user="$FILTER_USER" \
+		-v timefmt="$TIME_FMT" \
+		-v verbose=${VERBOSE:-0} \
+	'################################################# BEGIN
+
+	BEGIN {
+		if (timefmt != "") {
+			srand()
+			time = srand()
+		}
+	}
+
+	################################################## MAIN
+
+	(type = $5) != "DIR" && (fd = $4) ~ /^[0-9]+[rwu-]$/ {
+		cmd = $1
+		pid = $2
+		user = $3
+		if (filter_user != "" && user != filter_user) next
+		filename = $0
+		sub("^[^/]*/", "/", filename)
+		sub(/ \([^)]+\)$/, "", filename)
+		if (verbose) {
+			printf "%s|enter_open|%s|%s|%u|%s\n",
+				timefmt == "" ? "" : time,
+				user, cmd, pid, filename
+		}
+		printf "%s|exit_open|%s|%s|%u|%d|1\n",
+			timefmt == "" ? "" : time, user, cmd, pid, fd
+	}
+	' # END-QUOTE
+
+	run "$@" <<EOF
+	/* -*- mode: dtrace-script; tab-width: 4 -*- ;; Emacs
+	 * vi: set ft=dtrace noet ts=4 sw=4 :: Vi/ViM
+	 */
+
+	#include <linux/fs.h>
+	#include <linux/mount.h>
+
+	/*
+	 * open(2)/openat(2) [enter] probes
+	 */
+
+$( for func in sys_enter_open sys_enter_openat; do
+	name=${func#*enter_}
+	printf "\ttracepoint:syscalls:%s\n" $func
+	condition=
+	[ ! "$COMM" ] || condition="$condition && comm == str(\$1)"
+	[ ! "$FILTER_GID" ] || condition="$condition && gid == $FILTER_GID"
+	[ ! "$FILTER_UID" ] || condition="$condition && uid == $FILTER_UID"
+	[ ! "$condition" ] || printf "\t/%s/\n" "${condition# && }"
+cat <<PROBE
+	{
+		delete(@vfs_${name}_nfs[tid]); // Flag from vfs_open
+		@vfs_$name[tid] = 1; // Flag for vfs_open${VERBOSE:+
+`cat <<VERBOSE
+${TIME_FMT:+
+		time($RAW_TIME_FMT);}
+		printf("|${func#sys_}|%d.%d|%s|%d|%s\n",
+			uid, gid, comm, pid, str(args->filename));
+VERBOSE`}
+	}
+
+PROBE
+done )
+
+	/*
+	 * Kernel probes
+	 * NB: vfs_open() always called after open(2)/openat(2)
+	 */
+
+$( for func in sys_enter_open sys_enter_openat; do
+	name=${func#*enter_}
+	exit_func=${func%%enter_*}exit_$name
+cat <<PROBE
+	kprobe:vfs_open
+	/@vfs_$name[tid]/
+	{
+		delete(@vfs_$name[tid]); // Flag from $func
+
+		//
+		// Extract the filesystem type from mount superblock
+		//
+		\$path = (struct path *)arg0;
+		\$mnt = (struct vfsmount *)\$path->mnt;
+		\$mnt_sb = (struct super_block *)\$mnt->mnt_sb;
+		\$type = (struct file_system_type *)\$mnt_sb->s_type;
+		\$fstype = \$type->name;
+
+		//
+		// Test for NFS
+		//
+		if (str(\$fstype) == "nfs") {
+			@vfs_${name}_nfs[tid] = 1; // Flag for $exit_func
+		}
+	}
+
+PROBE
+done )
+
+	/*
+	 * open(2)/openat(2) [exit] probes
+	 */
+
+$( for func in sys_exit_open sys_exit_openat; do
+	name=${func#*exit_}
+cat <<PROBE
+	tracepoint:syscalls:$func
+	/@vfs_${name}_nfs[tid]/
+	{
+		delete(@vfs_${name}_nfs[tid]); // Flag from vfs_open
+
+		\$ret = args->ret;
+		if (\$ret >= 0)
+		{
+			\$fd = (uint64)\$ret;
+
+			// Set flag to trace read/write on fd
+			@trace[pid, \$fd] = 1;${VERBOSE:+
+`cat <<VERBOSE
+${TIME_FMT:+
+			time($RAW_TIME_FMT);}
+			printf("|${func#sys_}|%d.%d|%s|%d|%d|1\n",
+				uid, gid, comm, pid, \\\$fd);
+		}
+		else
+		{${TIME_FMT:+
+			time($RAW_TIME_FMT);}
+			printf("|${func#sys_}|%d.%d|%s|%d|%d|0\n",
+				uid, gid, comm, pid, \\\$fd);
+VERBOSE`}
+		}
+	}
+
+PROBE
+done )
+
+	/*
+	 * dup*(2) probes
+	 */
+
+	tracepoint:syscalls:sys_enter_dup
+	/@trace[pid, args->fildes]/
+	{
+		\$fd = (int64)args->fildes;
+
+		@dup_fd[tid] = \$fd; // Pass to sys_exit_dup
+	}
+
+	tracepoint:syscalls:sys_exit_dup
+	/@dup_fd[tid]/
+	{
+		\$oldfd = (int64)@dup_fd[tid];
+		\$newfd = (int64)args->ret;
+
+		delete(@dup_fd[tid]); // Arg from sys_enter_dup
+
+		if (\$oldfd != \$newfd)
+		{
+			// Set flag to trace read/write on fd
+			@trace[pid, \$newfd] = 1;
+${TIME_FMT:+
+			time($RAW_TIME_FMT);}
+			printf("|dup|%d.%d|%s|%d|%d|",
+				uid, gid, comm, pid, \$oldfd);
+			printf("%d\n", \$newfd);
+		}
+
+	}
+
+	tracepoint:syscalls:sys_enter_dup2
+	/@trace[pid, args->oldfd]/
+	{
+		\$oldfd = (int64)args->oldfd;
+		\$newfd = (int64)args->newfd;
+
+		if (\$oldfd != \$newfd)
+		{
+			// Set flag to trace read/write on fd
+			@trace[pid, \$newfd] = 1;
+${TIME_FMT:+
+			time($RAW_TIME_FMT);}
+			printf("|dup2|%d.%d|%s|%d|%d|",
+				uid, gid, comm, pid, \$oldfd);
+			printf("%d\n", \$newfd);
+		}
+	}
+
+	tracepoint:syscalls:sys_enter_dup3
+	/@trace[pid, args->oldfd]/
+	{
+		\$oldfd = (int64)args->oldfd;
+		\$newfd = (int64)args->newfd;
+
+		if (\$oldfd != \$newfd)
+		{
+			// Set flag to trace read/write on fd
+			@trace[pid, \$newfd] = 1;
+${TIME_FMT:+
+			time($RAW_TIME_FMT);}
+			printf("|dup3|%d.%d|%s|%d|%d|",
+				uid, gid, comm, pid, \$oldfd);
+			printf("%d\n", \$newfd);
+		}
+	}
+
+	/*
+	 * close(2) probe
+	 */
+
+	tracepoint:syscalls:sys_enter_close
+	/@trace[pid, args->fd]/
+	{
+		\$fd = args->fd;
+
+		delete(@trace[pid, \$fd]); // Stop tracing read/write on fd
+${VERBOSE:+
+`cat <<VERBOSE
+${TIME_FMT:+
+		time($RAW_TIME_FMT);}
+		printf("|close|%d.%d|%s|%d|%d\n", uid, gid, comm, pid, \\\$fd);
+VERBOSE`}
+	}
+
+	/*
+	 * Read/Write probes
+	 */
+
+	tracepoint:syscalls:sys_enter_read
+	/@trace[pid, args->fd]/
+	{
+		\$fd = args->fd;
+		\$count = args->count;
+
+		// Pass args to sys_exit_read
+		@read_fd[tid] = \$fd;
+		@read_count[pid, \$fd] = \$count;
+	}
+
+	tracepoint:syscalls:sys_exit_read
+	/@read_fd[tid]/
+	{
+		\$fd = @read_fd[tid];
+		\$count = @read_count[pid, \$fd];
+		\$ret = args->ret;
+
+		// Args from sys_enter_read
+		delete(@read_fd[tid]);
+		delete(@read_count[pid, \$fd]);
+${TIME_FMT:+
+		time($RAW_TIME_FMT);}
+		printf("|read|%d.%d|%s|%d|%d|", uid, gid, comm, pid, \$fd);
+		printf("%ld|%ld\n", \$count, \$ret);
+	}
+
+	tracepoint:syscalls:sys_enter_write
+	/@trace[pid, args->fd]/
+	{
+		\$fd = args->fd;
+		\$count = args->count;
+
+		// Pass args to sys_exit_write
+		@write_fd[tid] = \$fd;
+		@write_count[pid, \$fd] = \$count;
+	}
+
+	tracepoint:syscalls:sys_exit_write
+	/@write_fd[tid]/
+	{
+		\$fd = @write_fd[tid];
+		\$count = @write_count[pid, \$fd];
+		\$ret = args->ret;
+
+		// Args from sys_enter_write
+		delete(@write_fd[tid]);
+		delete(@write_count[pid, \$fd]);
+${TIME_FMT:+
+		time($RAW_TIME_FMT);}
+		printf("|write|%d.%d|%s|%d|%d|", uid, gid, comm, pid, \$fd);
+		printf("%ld|%ld\n", \$count, \$ret);
+	}
+
+	END {
+		clear(@dup_fd);
+		clear(@read_count);
+		clear(@read_fd);
+		clear(@trace);
+		clear(@vfs_open);
+		clear(@vfs_open_nfs);
+		clear(@vfs_openat);
+		clear(@vfs_openat_nfs);
+		clear(@write_count);
+		clear(@write_fd);
+	}
+EOF
+} | awk -F'|' \
+	-v cons=${CONS:-0} \
+	-v debug=${DEBUG:-0} \
+	-v quiet=${QUIET:-0} \
+	-v raw=${RAW_OUTPUT:-0} \
+	-v verbose=${VERBOSE:-0} \
+	-v stderr=/dev/stderr \
+	-v timefmt="$TIME_FMT" \
+	'################################################# BEGIN
+
+	BEGIN {
+		red   = "\033[31m"
+		green = "\033[32m"
+		cyan  = "\033[36m"
+		frset = "\033[39m"
+
+		srand() # Seed clock
+		tlim = srand() * 2 # limit time outliers
+	}
+
+	################################################## FUNCTIONS
+
+	function key(a, b) { return a "," b }
+	function fprint() { print; fflush() }
+	function eprint() { print > stderr; fflush(stderr) }
+
+	function emit(color, str)
+	{
+		if (timefmt != "") {
+			if (time !~ /^[0-9]+$/ || time > tlim || time < 0)
+				return
+			printf "%s%s%s %s %s[%u]: %s\n",
+				cons ? color : "", strftime(timefmt, time),
+				cons ? frset : "", user, cmd, pid, str;
+		} else {
+			printf "%s %s[%u]: %s\n", user, cmd, pid, str;
+		}
+		fflush()
+	}
+
+	################################################## MAIN
+
+	debug { sub(/^\t/, ""); fprint(); next }
+	raw { fprint(); next }
+ 	/^Attaching [0-9]+ probes/ { eprint(); next }
+
+	# Fields
+	{ time = $1 }
+	timefmt != "" {
+		if (time == "" || time < 0) next
+	}
+	NF < 6 { next }
+	{
+		call = $2
+		user = $3
+		cmd = $4
+		pid = $5
+		if (call == "enter_open" || call == "enter_openat") {
+			filename = $6
+		} else {
+			fd = $6
+		}
+	}
+
+	call == "enter_open" || call == "enter_openat" {
+		filename_cache[pid] = filename
+		next
+	}
+
+	call == "exit_open" || call == "exit_openat" {
+		callname = substr(call, 6)
+		if ($7 == 1) { # NFS
+			filename = filename_cache[pid]
+			delete filename_cache[pid]
+			filename_cache[key(pid, fd)] = filename
+			if (verbose && !quiet) {
+				emit(green, sprintf("%s(filename=%s) = %d",
+					callname, filename, fd))
+			}
+		} else {
+			delete filename_cache[pid]
+		}
+		next
+	}
+
+	call == "dup" {
+		if (!verbose) next
+		filename = filename_cache[key(pid, fd)]
+		newfd = $7
+		filename_cache[key(pid, newfd)] = filename
+		if (!quiet) {
+			emit(green, sprintf("dup(fd=%d <%s>) = %d",
+				fd, filename, newfd))
+		}
+		next
+	}
+
+	call == "dup2" || call == "dup3" {
+		if (!verbose) next
+		filename = filename_cache[key(pid, fd)]
+		newfd = $7
+		filename_cache[key(pid, newfd)] = filename
+		if (!quiet) {
+			emit(green, sprintf("%s(oldfd=%d <%s>, newfd=%d)",
+				call, fd, filename, newfd))
+		}
+		next
+	}
+
+	call == "close" {
+		if (!verbose) next
+		k = key(pid, fd)
+		filename = filename_cache[k]
+		delete filename_cache[k]
+		if (!quiet) {
+			emit(green, sprintf("close(fd=%d <%s>)", fd, filename))
+		}
+		next
+	}
+
+	call == "read" || call == "write" {
+		ret = $8
+		if (quiet && ret == 0) next
+		count = $7
+		filename = filename_cache[key(pid, fd)]
+		if (verbose) {
+			emit(call == "read" ? cyan : red,
+				sprintf("%s(fd=%d <%s>, count=%ld) = %ld",
+				call, fd, filename, count, ret))
+		} else if (ret > 0) {
+			emit(call == "read" ? cyan : red,
+				sprintf("%s(fd=%d, count=%ld) = %ld",
+				call, fd, count, ret))
+		}
+		next
+	}
+' # END-QUOTE
+
+################################################################################
+# END
+################################################################################
+# Local Variables:
+# mode: sh
+# tab-width: 8
+# sh-basic-offset: 8
+# indent-tabs-mode: t
+# backward-delete-char-untabify-method: nil
+# End:
