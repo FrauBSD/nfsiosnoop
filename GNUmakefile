@@ -2,7 +2,7 @@
 #
 # $Title: Makefile for installing nfsiosnoop $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/GNUmakefile 2020-02-03 11:12:26 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/GNUmakefile 2020-02-03 11:19:39 -0800 freebsdfrau $
 #
 ############################################################ CONFIGURATION
 
@@ -28,10 +28,10 @@ all:
 
 install:
 	$(MKDIR_P) $(BINDIR)
-	$(CP_F) $(NSADMIN) $(BINDIR)/
+	$(CP_F) $(NFSIOSNOOP) $(BINDIR)/
 
 uninstall:
-	$(RM_F) $(BINDIR)/$(NSADMIN)
+	$(RM_F) $(BINDIR)/$(NFSIOSNOOP)
 
 ################################################################################
 # END
