@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:12:40 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:15:13 -0800 freebsdfrau $
 #
 ############################################################ ENVIRONMENT
 
@@ -16,7 +16,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-alpha-1 $'
+VERSION='$Version: 4.0-alpha-2 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -49,6 +49,16 @@ RAW_TIME_FMT='"%s"'
 
 ############################################################ FUNCTIONS
 
+die()
+{
+	local fmt="$1"
+	if [ "$fmt" ]; then
+		shift 1 # fmt
+		printf "%s: $fmt\n" "$pgm" "$@"
+	fi
+	exit $FAILURE
+}
+
 if [ "$CONS" ]; then
 info(){ printf "\033[35mINFO\033[39m %s\n" "$*" >&2; }
 else
@@ -70,7 +80,7 @@ usage()
 	printf "$optfmt" "-g group" "Filter on group. Can be name or GID."
 	printf "$optfmt" "-V" "Print version and exit."
 	printf "$optfmt" "-v" "Verbose. Show filenames and hidden tracepoints."
-	exit $FAILURE
+	die
 }
 
 lsofN()
