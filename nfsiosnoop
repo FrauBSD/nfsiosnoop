@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:31:57 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:38:05 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-alpha-4 $'
+VERSION='$Version: 4.0-alpha-5 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -95,7 +95,7 @@ run()
 		return
 	fi
 
-	bpftrace -B none /dev/stdin "$@"
+	exec bpftrace -B none /dev/stdin "$@"
 }
 
 ############################################################ MAIN
@@ -173,6 +173,12 @@ fi
 #
 {
 	#
+	# Enable job control so we can bring bpftrace back to foreground
+	# NB: Otherwise Ctrl-C does not function as expected
+	#
+	set -m
+
+	#
 	# Inspect running system
 	#
 	if [ ! "$IGNORE_RUNNING" ]; then
@@ -216,9 +222,9 @@ fi
 	fi
 
 	#
-	# Start bpftrace
+	# Start background bpftrace
 	#
-	run "$@" <<EOF
+	run "$@" <<EOF &
 	/* -*- mode: dtrace-script; tab-width: 4 -*- ;; Emacs
 	 * vi: set ft=dtrace noet ts=4 sw=4 :: Vi/ViM
 	 */
@@ -482,6 +488,14 @@ ${TIME_FMT:+
 		clear(@write_fd);
 	}
 EOF
+	pid=$!
+
+	#
+	# Bring bpftrace child back to the foreground
+	#
+	exec > /dev/null # make below fg silent (no effect on job stdout)
+	fg %1
+
 } | awk -F'|' \
 	-v cons=${CONS:-0} \
 	-v debug=${DEBUG:-0} \
