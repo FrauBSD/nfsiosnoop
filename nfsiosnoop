@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:45:35 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:49:13 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-beta-2 $'
+VERSION='$Version: 4.0-rc-1 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -26,6 +26,7 @@ FAILURE=1
 # Command-line options
 #
 DEBUG=				# -d
+FILTER_FOLLOW=			# -f
 FILTER_GROUP=			# -g group
 FILTER_USER=			# -u user
 IGNORE_RUNNING=			# -n
@@ -42,7 +43,10 @@ CONS=1
 [ -t 1 ] || CONS= # stdout is not a tty
 FILTER_GID=
 FILTER_UID=
+FOLLOW_PIDS=
+FORK_CONDITION=
 MAP_ID1=
+MAP_ID2=
 OPEN_CONDITION=
 OPEN_FDS=
 RAW_TIME_FMT='"%s"'
@@ -72,6 +76,7 @@ usage()
 	printf "Usage: %s [OPTIONS] [comm]\n" "$pgm"
 	printf "Options:\n"
 	printf "$optfmt" "-d" "Debug. Print script and exit."
+	printf "$optfmt" "-f" "Follow descendents of matching processes."
 	printf "$optfmt" "-h" "Print usage statement and exit."
 	printf "$optfmt" "-n" "Ignore already-running processes."
 	printf "$optfmt" "-q" "Quiet. Hide dup*, open/close, and null r/w."
@@ -198,9 +203,10 @@ bpf_map_ids()
 #
 # Process command-line options
 #
-while getopts dg:hnqrt:u:Vv flag; do
+while getopts dfg:hnqrt:u:Vv flag; do
 	case "$flag" in
 	d) DEBUG=1 ;;
+	f) FILTER_FOLLOW=1 ;;
 	g) FILTER_GROUP="$OPTARG" ;;
 	n) IGNORE_RUNNING=1 ;;
 	q) QUIET=1 ;;
@@ -220,6 +226,12 @@ shift $(( $OPTIND - 1 ))
 # Process command-line arguments
 #
 COMM="$1"
+
+#
+# Process `-f' command-line option
+#
+[ ! "$FILTER_FOLLOW" ] || [ "$COMM$FILTER_GROUP$FILTER_USER" ] ||
+	die "\`-f' requires \`-u user', \`-g group', or \`comm'"
 
 #
 # Process user/group options
@@ -280,12 +292,48 @@ fi
 		exec 3<&1
 
 		#
+		# Find matching processes and their children
+		#
+		if [ "$FILTER_FOLLOW" ]; then
+			FOLLOW_PIDS=$( pgrep ${COMM:+"$COMM"} \
+				${FILTER_USER:+-U "$FILTER_USER"} \
+				${FILTER_GROUP:+-G "$FILTER_GROUP"} |
+				xargs -rn1 pstree -p | awk '
+				BEGIN { delete seen }
+				function del(re){gsub(re,"")}
+				function space(re){gsub(re," ")}
+				match($0, /^[^[:space:](]+\([0-9]+\)/) {
+					pid = substr($0, 1, RLENGTH - 1)
+					$0 = substr($0, RLENGTH + 1)
+					sub(/.*\(/, "", pid)
+					if (!(pid in seen))
+						pids = pids " " pid
+				}
+				{
+					space("[^0-9]")
+					space("[[:space:]]+")
+					del("(^[[:space:]]+|[[:space:]]+$)")
+					npids = split($0, list)
+					for (n = 1; n <= npids; n++) {
+						if ((pid = list[n]) in seen)
+							continue
+						pids = pids " " pid
+						seen[pid]
+					}
+				}
+				END { print substr(pids, 2) }
+			' )
+		fi
+
+		#
 		# Find open NFS *file* descriptors
 		#
 		OPEN_FDS=$( lsofN | awk \
 			-v comm="$COMM" \
+			-v filter_follow=${FILTER_FOLLOW:-0} \
 			-v filter_group="$FILTER_GROUP" \
 			-v filter_user="$FILTER_USER" \
+			-v follow_pids="$FOLLOW_PIDS" \
 			-v timefmt="$TIME_FMT" \
 			-v stderr=/dev/stderr \
 			-v verbose=${VERBOSE:-0} \
@@ -296,6 +344,11 @@ fi
 				srand()
 				time = srand()
 			}
+
+			delete follow
+			nfollow = split(follow_pids, list)
+			for (n = 1; n <= nfollow; n++)
+				follow[list[n]]
 		}
 
 		######################################## MAIN
@@ -304,6 +357,11 @@ fi
 			cmd = $1
 			pid = $2
 			user = $3
+
+			# follow filter
+			if (filter_follow && !(pid in follow)) {
+				next
+			}
 
 			# comm filter
 			if (comm != "" && cmd != comm) {
@@ -357,11 +415,24 @@ fi
 	# Generate conditions
 	#
 	condition=
-	[ ! "$COMM" ] || condition="$condition && comm == str(\$1)"
+	if [ "$COMM" ]; then
+		if [ "$FILTER_FOLLOW" ]; then
+			# For tracepoint:sched:sched_process_fork
+			condition="$condition && args->parent_comm == str(\$1)"
+		else
+			# For tracepoint:syscalls:sys_enter_open*
+			condition="$condition && comm == str(\$1)"
+		fi
+	fi
 	[ ! "$FILTER_GID" ] || condition="$condition && gid == $FILTER_GID"
 	[ ! "$FILTER_UID" ] || condition="$condition && uid == $FILTER_UID"
 	condition="${condition# && }"
-	OPEN_CONDITION="$condition"
+	if [ "$FILTER_FOLLOW" ]; then
+		FORK_CONDITION="$condition"
+		OPEN_CONDITION="@follow[pid]"
+	else
+		OPEN_CONDITION="$condition"
+	fi
 
 	#
 	# Start background bpftrace
@@ -378,8 +449,30 @@ fi
 	{
 		@trace[-1,-1] = 1; // Required to create map
 		delete(@trace[-1,-1]); // Delete dummy entry
+${FILTER_FOLLOW:+
+		@follow[-1] = 1;
+		delete(@follow[-1]);}
+	}
+${FILTER_FOLLOW:+"
+	tracepoint:sched:sched_process_fork
+	/$FORK_CONDITION/
+	{
+		@follow[args->parent_pid] = 1;
+		@follow[args->child_pid] = 1;
 	}
 
+	tracepoint:sched:sched_process_fork
+	/@follow[args->parent_pid]/
+	{
+		@follow[args->child_pid] = 1;
+	}
+
+	tracepoint:sched:sched_process_exit
+	/@follow[args->pid]/
+	{
+		delete(@follow[args->pid]);
+	}
+"}
 	/*
 	 * open(2)/openat(2) [enter] probes
 	 */
@@ -619,7 +712,8 @@ ${TIME_FMT:+
 		printf("%ld|%ld\n", \$count, \$ret);
 	}
 
-	END {
+	END {${FILTER_FOLLOW:+
+		clear(@follow);}
 		clear(@dup_fd);
 		clear(@read_count);
 		clear(@read_fd);
@@ -637,7 +731,7 @@ EOF
 	#
 	# Identify child bpftrace
 	#
-	if [ "$OPEN_FDS" -a ! "$DEBUG" ]; then
+	if [ "$OPEN_FDS$FOLLOW_PIDS" -a ! "$DEBUG" ]; then
 		#
 		# Running?
 		# NB: Might die immediately for some unknown reason
@@ -655,6 +749,8 @@ EOF
 		# Store map ids
 		#
 		MAP_ID1=${map_ids%%,*}
+		MAP_ID2=${map_ids#*,}
+		MAP_ID2=${MAP_ID2%%,*}
 	fi
 
 	#
@@ -671,6 +767,17 @@ EOF
 			num2bytes 1    8B map_value
 			echo map update id $MAP_ID1 \
 				key $map_pid $map_fd value $map_value
+		done | bpftool batch file /dev/stdin
+	fi
+	if [ "$FOLLOW_PIDS" -a "$MAP_ID2" ]; then
+		count cnt $FOLLOW_PIDS
+		info "Loading $cnt pids into bpftrace map" \
+			"(pid $pid, prog $prog_id, map $MAP_ID2)..."
+		for pid in $FOLLOW_PIDS; do
+			num2bytes $pid 8B map_key
+			num2bytes 1    8B map_value
+			echo map update id $MAP_ID2 \
+				key $map_key value $map_value
 		done | bpftool batch file /dev/stdin
 	fi
 
