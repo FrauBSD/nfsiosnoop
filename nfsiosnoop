@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:49:13 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:54:25 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-rc-1 $'
+VERSION='$Version: 4.0-rc-2 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -33,7 +33,7 @@ IGNORE_RUNNING=			# -n
 QUIET=				# -q
 RAW_OUTPUT=			# -r
 TIME_FMT="$DEFAULT_TIME_FMT"	# -t fmt
-VERBOSE=			# -v
+VERBOSE=1			# -q
 
 #
 # Miscellaneous
@@ -85,7 +85,6 @@ usage()
 	printf "$optfmt" "-u user" "Filter on user. Can be name or UID."
 	printf "$optfmt" "-g group" "Filter on group. Can be name or GID."
 	printf "$optfmt" "-V" "Print version and exit."
-	printf "$optfmt" "-v" "Verbose. Show filenames and hidden tracepoints."
 	die
 }
 
@@ -203,20 +202,19 @@ bpf_map_ids()
 #
 # Process command-line options
 #
-while getopts dfg:hnqrt:u:Vv flag; do
+while getopts dfg:hnqrt:u:V flag; do
 	case "$flag" in
 	d) DEBUG=1 ;;
 	f) FILTER_FOLLOW=1 ;;
 	g) FILTER_GROUP="$OPTARG" ;;
 	n) IGNORE_RUNNING=1 ;;
-	q) QUIET=1 ;;
+	q) QUIET=1 VERBOSE= ;;
 	r) RAW_OUTPUT=1 ;;
 	t) TIME_FMT="$OPTARG" ;;
 	u) FILTER_USER="$OPTARG" ;;
 	V) VERSION="${VERSION#*: }"
 		echo "${VERSION% $}"
 		exit $SUCCESS ;;
-	v) VERBOSE=1 ;;
 	*) usage # NOTREACHED
 	esac
 done
