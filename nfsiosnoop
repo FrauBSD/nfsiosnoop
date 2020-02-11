@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:46:46 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:36:22 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-alpha-7 $'
+VERSION='$Version: 4.0-alpha-8 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -42,7 +42,9 @@ CONS=1
 [ -t 1 ] || CONS= # stdout is not a tty
 FILTER_GID=
 FILTER_UID=
+MAP_ID1=
 OPEN_CONDITION=
+OPEN_FDS=
 RAW_TIME_FMT='"%s"'
 
 ############################################################ FUNCTIONS
@@ -275,13 +277,15 @@ fi
 	# Inspect running system
 	#
 	if [ ! "$IGNORE_RUNNING" ]; then
+		exec 3<&1
 
 		#
 		# Find open NFS *file* descriptors
 		#
-		lsofN | awk \
+		OPEN_FDS=$( lsofN | awk \
 			-v filter_user="$FILTER_USER" \
 			-v timefmt="$TIME_FMT" \
+			-v stderr=/dev/stderr \
 			-v verbose=${VERBOSE:-0} \
 		'####################################### BEGIN
 
@@ -300,6 +304,11 @@ fi
 			user = $3
 
 			if (filter_user != "" && user != filter_user) next
+
+			#
+			# Send information to post-processor about open
+			# file-descriptor matching search criterion.
+			#
 			filename = $0
 			sub("^[^/]*/", "/", filename)
 			sub(/ \([^)]+\)$/, "", filename)
@@ -310,8 +319,13 @@ fi
 			}
 			printf "%s|exit_open|%s|%s|%u|%d|1\n",
 				timefmt == "" ? "" : time, user, cmd, pid, fd
+
+			#
+			# Save information for later bpftool
+			#
+			printf "%d:%d\n", pid, fd > stderr
 		}
-		' # END-QUOTE
+		' 2>&1 >&3 )
 	fi
 
 	#
@@ -334,6 +348,12 @@ fi
 
 	#include <linux/fs.h>
 	#include <linux/mount.h>
+
+	BEGIN
+	{
+		@trace[-1,-1] = 1; // Required to create map
+		delete(@trace[-1,-1]); // Delete dummy entry
+	}
 
 	/*
 	 * open(2)/openat(2) [enter] probes
@@ -588,6 +608,46 @@ ${TIME_FMT:+
 	}
 EOF
 	pid=$!
+
+	#
+	# Identify child bpftrace
+	#
+	if [ "$OPEN_FDS" -a ! "$DEBUG" ]; then
+		#
+		# Running?
+		# NB: Might die immediately for some unknown reason
+		#
+		sleep 1
+		kill -0 $pid 2> /dev/null || exit
+
+		#
+		# Get id of maps created in BEGIN
+		#
+		bpf_prog_id $pid BEGIN prog_id
+		bpf_map_ids $prog_id map_ids
+
+		#
+		# Store map ids
+		#
+		MAP_ID1=${map_ids%%,*}
+	fi
+
+	#
+	# Update map entries
+	#
+	if [ "$OPEN_FDS" -a "$MAP_ID1" ]; then
+		count cnt $OPEN_FDS
+		info "Loading $cnt fds into bpftrace map" \
+			"(pid $pid, prog $prog_id, map $MAP_ID1)..."
+		for pid_fd in $OPEN_FDS; do
+			pid="${pid_fd%%:*}" fd="${pid_fd#*:}"
+			num2bytes $pid 8B map_pid
+			num2bytes $fd  8B map_fd
+			num2bytes 1    8B map_value
+			echo map update id $MAP_ID1 \
+				key $map_pid $map_fd value $map_value
+		done | bpftool batch file /dev/stdin
+	fi
 
 	#
 	# Bring bpftrace child back to the foreground
