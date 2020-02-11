@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:39:14 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:41:36 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-alpha-9 $'
+VERSION='$Version: 4.0-beta-1 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -283,6 +283,7 @@ fi
 		# Find open NFS *file* descriptors
 		#
 		OPEN_FDS=$( lsofN | awk \
+			-v comm="$COMM" \
 			-v filter_user="$FILTER_USER" \
 			-v timefmt="$TIME_FMT" \
 			-v stderr=/dev/stderr \
@@ -302,6 +303,11 @@ fi
 			cmd = $1
 			pid = $2
 			user = $3
+
+			# comm filter
+			if (comm != "" && cmd != comm) {
+				next
+			}
 
 			# user filter
 			if (filter_user != "" && user != filter_user) {
