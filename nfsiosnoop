@@ -4,19 +4,15 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:15:13 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:21:21 -0800 freebsdfrau $
 #
-############################################################ ENVIRONMENT
-
-: "${USER:=$( id -nu )}" # Used to determine whether sudo(8) should be used
-
 ############################################################ DEFAULTS
 
 DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-alpha-2 $'
+VERSION='$Version: 4.0-alpha-3 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -87,10 +83,7 @@ lsofN()
 {
 	[ "$DEBUG" ] && return
 
-	case "$USER" in
-	root) lsof -N +c 0 ;;
-	*) sudo lsof -N +c 0
-	esac
+	lsof -N +c 0
 }
 
 run()
@@ -100,10 +93,7 @@ run()
 		return
 	fi
 
-	case "$USER" in
-	root) bpftrace -B none /dev/stdin "$@" ;;
-	*) sudo bpftrace -B none /dev/stdin "$@"
-	esac
+	bpftrace -B none /dev/stdin "$@"
 }
 
 ############################################################ MAIN
@@ -164,9 +154,15 @@ case "$FILTER_GROUP" in
 esac
 
 #
-# Inform the user what we are doing
+# Check user
 #
-[ "$DEBUG" ] || info "Tracing NFS... Hit Ctrl-C to end."
+if [ ! "$DEBUG" ]; then
+	if [ "${USER:=$( id -nu )}" != root ]; then
+		echo "Must be root!" >&2
+		exit $FAILURE
+	fi
+	info "Tracing NFS... Hit Ctrl-C to end."
+fi
 
 #
 # Run script
