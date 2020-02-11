@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:41:36 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:45:35 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-beta-1 $'
+VERSION='$Version: 4.0-beta-2 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -284,6 +284,7 @@ fi
 		#
 		OPEN_FDS=$( lsofN | awk \
 			-v comm="$COMM" \
+			-v filter_group="$FILTER_GROUP" \
 			-v filter_user="$FILTER_USER" \
 			-v timefmt="$TIME_FMT" \
 			-v stderr=/dev/stderr \
@@ -312,6 +313,21 @@ fi
 			# user filter
 			if (filter_user != "" && user != filter_user) {
 				next
+			}
+
+			# group filter
+			if (filter_group != "") {
+				gid = ""
+				file = sprintf("/proc/%d/status", pid)
+				while (getline L < file > 0) {
+					if (L !~ /^Gid:/) next
+					sub(/^Gid:[[:space:]]*/, "", L)
+					sub(/[^0-9].*/, "", L)
+					gid = L
+					break
+				}
+				close(file)
+				if (gid != filter_group) next
 			}
 
 			#
