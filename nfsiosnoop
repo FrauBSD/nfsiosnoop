@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:21:21 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:31:57 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-alpha-3 $'
+VERSION='$Version: 4.0-alpha-4 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -28,6 +28,7 @@ FAILURE=1
 DEBUG=				# -d
 FILTER_GROUP=			# -g group
 FILTER_USER=			# -u user
+IGNORE_RUNNING=			# -n
 QUIET=				# -q
 RAW_OUTPUT=			# -r
 TIME_FMT="$DEFAULT_TIME_FMT"	# -t fmt
@@ -69,6 +70,7 @@ usage()
 	printf "Options:\n"
 	printf "$optfmt" "-d" "Debug. Print script and exit."
 	printf "$optfmt" "-h" "Print usage statement and exit."
+	printf "$optfmt" "-n" "Ignore already-running processes."
 	printf "$optfmt" "-q" "Quiet. Hide dup*, open/close, and null r/w."
 	printf "$optfmt" "-r" "Show unformatted raw output."
 	printf "$optfmt" "-t fmt" "Time format. Default \`$DEFAULT_TIME_FMT'."
@@ -101,10 +103,11 @@ run()
 #
 # Process command-line options
 #
-while getopts dg:hqrt:u:Vv flag; do
+while getopts dg:hnqrt:u:Vv flag; do
 	case "$flag" in
 	d) DEBUG=1 ;;
 	g) FILTER_GROUP="$OPTARG" ;;
+	n) IGNORE_RUNNING=1 ;;
 	q) QUIET=1 ;;
 	r) RAW_OUTPUT=1 ;;
 	t) TIME_FMT="$OPTARG" ;;
@@ -169,40 +172,52 @@ fi
 # NB: M-x package-install [RET] dtrace-script-mode [RET]
 #
 {
-	# List current open connections
-	lsofN | awk \
-		-v filter_user="$FILTER_USER" \
-		-v timefmt="$TIME_FMT" \
-		-v verbose=${VERBOSE:-0} \
-	'################################################# BEGIN
+	#
+	# Inspect running system
+	#
+	if [ ! "$IGNORE_RUNNING" ]; then
 
-	BEGIN {
-		if (timefmt != "") {
-			srand()
-			time = srand()
+		#
+		# Find open NFS *file* descriptors
+		#
+		lsofN | awk \
+			-v filter_user="$FILTER_USER" \
+			-v timefmt="$TIME_FMT" \
+			-v verbose=${VERBOSE:-0} \
+		'####################################### BEGIN
+
+		BEGIN {
+			if (timefmt != "") {
+				srand()
+				time = srand()
+			}
 		}
-	}
 
-	################################################## MAIN
+		######################################## MAIN
 
-	(type = $5) != "DIR" && (fd = $4) ~ /^[0-9]+[rwu-]$/ {
-		cmd = $1
-		pid = $2
-		user = $3
-		if (filter_user != "" && user != filter_user) next
-		filename = $0
-		sub("^[^/]*/", "/", filename)
-		sub(/ \([^)]+\)$/, "", filename)
-		if (verbose) {
-			printf "%s|enter_open|%s|%s|%u|%s\n",
-				timefmt == "" ? "" : time,
-				user, cmd, pid, filename
+		(type = $5) != "DIR" && (fd = $4) ~ /^[0-9]+[rwu-]$/ {
+			cmd = $1
+			pid = $2
+			user = $3
+
+			if (filter_user != "" && user != filter_user) next
+			filename = $0
+			sub("^[^/]*/", "/", filename)
+			sub(/ \([^)]+\)$/, "", filename)
+			if (verbose) {
+				printf "%s|enter_open|%s|%s|%u|%s\n",
+					timefmt == "" ? "" : time,
+					user, cmd, pid, filename
+			}
+			printf "%s|exit_open|%s|%s|%u|%d|1\n",
+				timefmt == "" ? "" : time, user, cmd, pid, fd
 		}
-		printf "%s|exit_open|%s|%s|%u|%d|1\n",
-			timefmt == "" ? "" : time, user, cmd, pid, fd
-	}
-	' # END-QUOTE
+		' # END-QUOTE
+	fi
 
+	#
+	# Start bpftrace
+	#
 	run "$@" <<EOF
 	/* -*- mode: dtrace-script; tab-width: 4 -*- ;; Emacs
 	 * vi: set ft=dtrace noet ts=4 sw=4 :: Vi/ViM
