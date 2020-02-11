@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:38:05 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 14:40:50 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-alpha-5 $'
+VERSION='$Version: 4.0-alpha-6 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -96,6 +96,98 @@ run()
 	fi
 
 	exec bpftrace -B none /dev/stdin "$@"
+}
+
+count()
+{
+	local __var_to_set="$1"
+	shift 1 # var_to_set
+	eval $__var_to_set=$#
+}
+
+num2bytes()
+{
+	local __num="$1" __size="${2%B}" __var_to_set="$3"
+	local __out=
+	while [ $__size -gt 0 ]; do
+		__out="$__out $(( $__num % 256 ))"
+		__num=$(( $__num >> 8 ))
+		__size=$(( $__size - 1 ))
+	done
+	__out="${__out# }"
+	if [ "$__var_to_set" ]; then
+		eval $__var_to_set=\"\$__out\"
+	else
+		echo "$__out"
+	fi
+}
+
+bpf_prog_id()
+{
+	local __pid="$1" __prog="$2" __var_to_set="$3"
+	local __ls __out __res
+
+	[ "$__pid" -a "$__prog" ] || return ${FAILURE:-1}
+
+	__ls=$( ls -l /proc/$__pid/fd ) || return
+	__out=$( echo "$__ls" | awk -v pid=$__pid -v prog="$__prog" '
+		$NF == "anon_inode:bpf-prog" {
+			fd = $(NF-2)
+			fdinfo = sprintf("/proc/%d/fdinfo/%d", pid, fd)
+			id = ""
+			while (getline < fdinfo > 0) {
+				if ($1 != "prog_id:") continue
+				id = $2
+				break
+			}
+			close(fdinfo)
+			if (id == "") next
+			cmd = sprintf("bpftool prog show id %d", id)
+			if (cmd | getline <= 0 || $4 != prog) {
+				close(cmd)
+				next
+			}
+			print id
+			exit found = 1
+		}
+		END { exit found ? 0 : 3 }
+	' )
+	__res=$?
+
+	if [ "$__var_to_set" ]; then
+		eval $__var_to_set=\"\$__out\"
+	else
+		echo "$__out"
+	fi
+
+	return $__res
+}
+
+bpf_map_ids()
+{
+	local __prog="$1" __var_to_set="$2"
+	local __out __res
+
+	[ "$__prog" ] || return ${FAILURE:-1}
+
+	__out=$( bpftool prog show id $__prog ) || return
+	__out=$( echo "$__out" | awk '
+		$(NF-1) == "map_ids" {
+			print $NF
+			found = 1
+			exit
+		}
+		END { exit found ? 0 : 3 }
+	' )
+	__res=$?
+
+	if [ "$__var_to_set" ]; then
+		eval $__var_to_set=\"\$__out\"
+	else
+		echo "$__out"
+	fi
+
+	return $__res
 }
 
 ############################################################ MAIN
