@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 18:10:20 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 18:11:34 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-rc-5 $'
+VERSION='$Version: 4.0-rc-6 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -88,7 +88,7 @@ usage()
 	printf "$optfmt" "-r" "Show unformatted raw output."
 	printf "$optfmt" "-t fmt" "Time format. Default \`$DEFAULT_TIME_FMT'."
 	printf "$optfmt" "-u user" "Filter on user. Can be name or UID."
-	printf "$optfmt" "-V" "Print version and exit."
+	printf "$optfmt" "-v" "Print version and exit."
 	die
 }
 
@@ -206,7 +206,7 @@ bpf_map_ids()
 #
 # Process command-line options
 #
-while getopts dFfg:hnp:qrt:u:V flag; do
+while getopts dFfg:hnp:qrt:u:v flag; do
 	case "$flag" in
 	d) DEBUG=1 ;;
 	F) SHOW_PATHS= ;;
@@ -219,7 +219,7 @@ while getopts dFfg:hnp:qrt:u:V flag; do
 	r) RAW_OUTPUT=1 ;;
 	t) TIME_FMT="$OPTARG" ;;
 	u) FILTER_USER="$OPTARG" ;;
-	V) VERSION="${VERSION#*: }"
+	v) VERSION="${VERSION#*: }"
 		echo "${VERSION% $}"
 		exit $SUCCESS ;;
 	*) usage # NOTREACHED
