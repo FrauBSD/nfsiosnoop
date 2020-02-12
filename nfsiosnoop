@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 16:51:27 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 17:49:25 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-rc-3 $'
+VERSION='$Version: 4.0-rc-4 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -28,6 +28,7 @@ FAILURE=1
 DEBUG=				# -d
 FILTER_FOLLOW=			# -f
 FILTER_GROUP=			# -g group
+FILTER_PID=			# -p pid
 FILTER_USER=			# -u user
 IGNORE_RUNNING=			# -n
 QUIET=				# -q
@@ -79,13 +80,14 @@ usage()
 	printf "$optfmt" "-d" "Debug. Print script and exit."
 	printf "$optfmt" "-F" "Do not display file/directory paths."
 	printf "$optfmt" "-f" "Follow descendents of matching processes."
+	printf "$optfmt" "-g group" "Filter on group. Can be name or GID."
 	printf "$optfmt" "-h" "Print usage statement and exit."
 	printf "$optfmt" "-n" "Ignore already-running processes."
+	printf "$optfmt" "-p pid" "Trace process whose id is pid."
 	printf "$optfmt" "-q" "Quiet. Hide dup*, open/close, and null r/w."
 	printf "$optfmt" "-r" "Show unformatted raw output."
 	printf "$optfmt" "-t fmt" "Time format. Default \`$DEFAULT_TIME_FMT'."
 	printf "$optfmt" "-u user" "Filter on user. Can be name or UID."
-	printf "$optfmt" "-g group" "Filter on group. Can be name or GID."
 	printf "$optfmt" "-V" "Print version and exit."
 	die
 }
@@ -204,13 +206,14 @@ bpf_map_ids()
 #
 # Process command-line options
 #
-while getopts dFfg:hnqrt:u:V flag; do
+while getopts dFfg:hnp:qrt:u:V flag; do
 	case "$flag" in
 	d) DEBUG=1 ;;
 	F) SHOW_PATHS= ;;
 	f) FILTER_FOLLOW=1 ;;
 	g) FILTER_GROUP="$OPTARG" ;;
 	n) IGNORE_RUNNING=1 ;;
+	p) FILTER_PID="$OPTARG" ;;
 	q) QUIET=1 ;;
 	r) RAW_OUTPUT=1 ;;
 	t) TIME_FMT="$OPTARG" ;;
@@ -231,8 +234,9 @@ COMM="$1"
 #
 # Process `-f' command-line option
 #
-[ ! "$FILTER_FOLLOW" ] || [ "$COMM$FILTER_GROUP$FILTER_USER" ] ||
-	die "\`-f' requires \`-u user', \`-g group', or \`comm'"
+[ ! "$FILTER_FOLLOW" ] ||
+	[ "$COMM$FILTER_GROUP$FILTER_PID$FILTER_USER" ] ||
+	die "\`-f' requires \`-u user', \`-g group', \`-p pid', or \`comm'"
 
 #
 # Process `-F' and `-q' command-line options
@@ -272,6 +276,14 @@ case "$FILTER_GROUP" in
 esac
 
 #
+# Process pid option
+#
+case "$FILTER_PID" in
+"") die "\`-p' option requires an argument" ;;
+*[!0-9]*) die "\`-p' option must be a number" ;;
+esac
+
+#
 # Check user
 #
 if [ ! "$DEBUG" ]; then
@@ -303,10 +315,74 @@ fi
 		# Find matching processes and their children
 		#
 		if [ "$FILTER_FOLLOW" ]; then
-			FOLLOW_PIDS=$( pgrep ${COMM:+"$COMM"} \
-				${FILTER_USER:+-U "$FILTER_USER"} \
-				${FILTER_GROUP:+-G "$FILTER_GROUP"} |
-				xargs -rn1 pstree -p | awk '
+			if [ "$FILTER_PID" ]; then
+				FOLLOW_PIDS=$( pstree -p $FILTER_PID | awk \
+					-v filter_group="$FILTER_GROUP" \
+					-v filter_user="$FILTER_USER" '
+				BEGIN { delete seen }
+				function del(re){gsub(re,"")}
+				function space(re){gsub(re," ")}
+				function check_group(pid,        file, gid, L) {
+					if (filter_group == "") return 1 # OK
+					gid = ""
+					file = sprintf("/proc/%d/status", pid)
+					while (getline L < file > 0) {
+						if (L !~ /^Gid:/) next
+						sub(/^Gid:[[:space:]]*/, "", L)
+						sub(/[^0-9].*/, "", L)
+						gid = L
+						break
+					}
+					close(file)
+					return gid == filter_group
+				}
+				function check_user(pid,        file, uid, L) {
+					if (filter_user == "") return 1 # OK
+					uid = ""
+					file = sprintf("/proc/%d/status", pid)
+					while (getline L < file > 0) {
+						if (L !~ /^Uid:/) next
+						sub(/^Uid:[[:space:]]*/, "", L)
+						sub(/[^0-9].*/, "", L)
+						uid = L
+						break
+					}
+					close(file)
+					return uid == filter_user
+				}
+				match($0, /^[^[:space:](]+\([0-9]+\)/) {
+					pid = substr($0, 1, RLENGTH - 1)
+					$0 = substr($0, RLENGTH + 1)
+					sub(/.*\(/, "", pid)
+					if (!(pid in seen))
+						pids = pids " " pid
+				}
+				{
+					space("[^0-9]")
+					space("[[:space:]]+")
+					del("(^[[:space:]]+|[[:space:]]+$)")
+					npids = split($0, list)
+					for (n = 1; n <= npids; n++) {
+						if ((pid = list[n]) in seen)
+							continue
+
+						# group filter
+						if (!check_group(pid)) continue
+
+						# user filter
+						if (!check_user(pid)) continue
+
+						pids = pids " " pid
+						seen[pid]
+					}
+				}
+				END { print substr(pids, 2) }
+				' )
+			else
+				FOLLOW_PIDS=$( pgrep ${COMM:+"$COMM"} \
+					${FILTER_USER:+-U "$FILTER_USER"} \
+					${FILTER_GROUP:+-G "$FILTER_GROUP"} |
+					awk '
 				BEGIN { delete seen }
 				function del(re){gsub(re,"")}
 				function space(re){gsub(re," ")}
@@ -330,7 +406,8 @@ fi
 					}
 				}
 				END { print substr(pids, 2) }
-			' )
+				' )
+			fi
 		fi
 
 		#
@@ -340,6 +417,7 @@ fi
 			-v comm="$COMM" \
 			-v filter_follow=${FILTER_FOLLOW:-0} \
 			-v filter_group="$FILTER_GROUP" \
+			-v filter_pid="$FILTER_PID" \
 			-v filter_user="$FILTER_USER" \
 			-v follow_pids="$FOLLOW_PIDS" \
 			-v show_paths=${SHOW_PATHS:-0} \
@@ -369,31 +447,39 @@ fi
 			# follow filter
 			if (filter_follow && !(pid in follow)) {
 				next
-			}
+			} else {
+				# NB: follow_pids should contain all the pids
+				# that match the below criterion.
 
-			# comm filter
-			if (comm != "" && cmd != comm) {
-				next
-			}
-
-			# user filter
-			if (filter_user != "" && user != filter_user) {
-				next
-			}
-
-			# group filter
-			if (filter_group != "") {
-				gid = ""
-				file = sprintf("/proc/%d/status", pid)
-				while (getline L < file > 0) {
-					if (L !~ /^Gid:/) next
-					sub(/^Gid:[[:space:]]*/, "", L)
-					sub(/[^0-9].*/, "", L)
-					gid = L
-					break
+				# pid filter
+				if (filter_pid != "" && pid != filter_pid) {
+					next
 				}
-				close(file)
-				if (gid != filter_group) next
+
+				# comm filter
+				if (comm != "" && cmd != comm) {
+					next
+				}
+
+				# user filter
+				if (filter_user != "" && user != filter_user) {
+					next
+				}
+
+				# group filter
+				if (filter_group != "") {
+					gid = ""
+					file = sprintf("/proc/%d/status", pid)
+					while (getline L < file > 0) {
+						if (L !~ /^Gid:/) next
+						sub(/^Gid:[[:space:]]*/, "", L)
+						sub(/[^0-9].*/, "", L)
+						gid = L
+						break
+					}
+					close(file)
+					if (gid != filter_group) next
+				}
 			}
 
 			#
@@ -434,6 +520,14 @@ fi
 	fi
 	[ ! "$FILTER_GID" ] || condition="$condition && gid == $FILTER_GID"
 	[ ! "$FILTER_UID" ] || condition="$condition && uid == $FILTER_UID"
+	if [ "$FILTER_PID" ]; then
+		if [ "$FILTER_FOLLOW" ]; then
+			condition="pid == $FILTER_PID || (${condition# && })"
+			condition="${condition% || ()}"
+		else
+			condition="$condition && pid == $FILTER_PID"
+		fi
+	fi
 	condition="${condition# && }"
 	if [ "$FILTER_FOLLOW" ]; then
 		FORK_CONDITION="$condition"
