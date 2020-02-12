@@ -9,7 +9,7 @@ Group: Applications/FrauBSD
 
 Summary: nfsiosnoop
 License: BSD
-Version: 3.0
+Version: 4.0
 Release: 1
 Buildarch: noarch
 
@@ -21,8 +21,8 @@ BuildRoot: %{_tmppath}/src
 
 Requires: /bin/awk
 Requires: /bin/sh
-Requires: sudo
 Requires: bpftrace
+Requires: bpftool
 
 ############################################################ DESCRIPTION
 
@@ -76,5 +76,26 @@ WWW: https://www.fraubsd.org/nfsiosnoop
 
 
 %changelog
+* Wed Feb 12 2020 Devin Teske <dteske@fraubsd.org> 4.0-1
+- 1592133 Preserve bpftrace exit status
+- af0bfa4 Reduce indentation level
+- 5ac6f28 Prevent malformed input and fix handling fd=0
+- dfd4631 Change `-V' to `-v'
+- babca99 Fix `-p pid' checks
+- 1670ba0 Add `-p pid' option for following pid
+- 0695a87 Add `-F' option to supress showing paths
+- 4f2b93d Remove `-v', making it the default
+- 9a1ee67 Add `-f' option for following child processes
+- 51501c0 Support group filter when culling open file-descriptors
+- 925078a Support comm filter when culling open file-descriptors
+- 6d20e10 Adjust comments and style to minimize diff to beta-1
+- ae43cb5 Use bpftool to flag already-open file-descriptors
+- 6a3543b Prevent calculating open condition multiple times
+- 425540a Add helper functions for interacting with bpftool
+- bc69c93 Cull bpftrace pid for bpftool operations
+- 8d493de Add `-n' flag for ignoring active processes
+- f639362 Remove sudo support
+- 75a913c Add die() function
+- 6fe1d80 Sort command-line option variables
 * Mon Feb  3 2020 Devin Teske <dteske@fraubsd.org> 3.0-1
 - Package created.
