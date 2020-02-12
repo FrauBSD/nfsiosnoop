@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 18:35:57 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-12 10:54:33 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-rc-7 $'
+VERSION='$Version: 4.0-rc-8 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -306,113 +306,105 @@ fi
 	set -m
 
 	#
-	# Inspect running system
+	# Find matching processes and their children
+	#
+	if [ "$FILTER_FOLLOW" -a ! "$IGNORE_RUNNING" ]; then
+		if [ "$FILTER_PID" ]; then
+			FOLLOW_PIDS=$( pstree -p $FILTER_PID | awk \
+				-v filter_group="$FILTER_GROUP" \
+				-v filter_user="$FILTER_USER" '
+			BEGIN { delete seen }
+			function del(re){gsub(re,"")}
+			function space(re){gsub(re," ")}
+			function check_group(pid,        file, gid, L) {
+				if (filter_group == "") return 1 # OK
+				gid = ""
+				file = sprintf("/proc/%d/status", pid)
+				while (getline L < file > 0) {
+					if (L !~ /^Gid:/) next
+					sub(/^Gid:[[:space:]]*/, "", L)
+					sub(/[^0-9].*/, "", L)
+					gid = L
+					break
+				}
+				close(file)
+				return gid == filter_group
+			}
+			function check_user(pid,        file, uid, L) {
+				if (filter_user == "") return 1 # OK
+				uid = ""
+				file = sprintf("/proc/%d/status", pid)
+				while (getline L < file > 0) {
+					if (L !~ /^Uid:/) next
+					sub(/^Uid:[[:space:]]*/, "", L)
+					sub(/[^0-9].*/, "", L)
+					uid = L
+					break
+				}
+				close(file)
+				return uid == filter_user
+			}
+			match($0, /^[^[:space:](]+\([0-9]+\)/) {
+				pid = substr($0, 1, RLENGTH - 1)
+				$0 = substr($0, RLENGTH + 1)
+				sub(/.*\(/, "", pid)
+				if (!(pid in seen)) pids = pids " " pid
+			}
+			{
+				space("[^0-9]")
+				space("[[:space:]]+")
+				del("(^[[:space:]]+|[[:space:]]+$)")
+				npids = split($0, list)
+				for (n = 1; n <= npids; n++) {
+					if ((pid = list[n]) in seen) continue
+
+					# group filter
+					if (!check_group(pid)) continue
+
+					# user filter
+					if (!check_user(pid)) continue
+
+					pids = pids " " pid
+					seen[pid]
+				}
+			}
+			END { print substr(pids, 2) }
+			' )
+		else
+			FOLLOW_PIDS=$( pgrep ${COMM:+"$COMM"} \
+				${FILTER_USER:+-U "$FILTER_USER"} \
+				${FILTER_GROUP:+-G "$FILTER_GROUP"} |
+				awk '
+			BEGIN { delete seen }
+			function del(re){gsub(re,"")}
+			function space(re){gsub(re," ")}
+			match($0, /^[^[:space:](]+\([0-9]+\)/) {
+				pid = substr($0, 1, RLENGTH - 1)
+				$0 = substr($0, RLENGTH + 1)
+				sub(/.*\(/, "", pid)
+				if (!(pid in seen)) pids = pids " " pid
+			}
+			{
+				space("[^0-9]")
+				space("[[:space:]]+")
+				del("(^[[:space:]]+|[[:space:]]+$)")
+				npids = split($0, list)
+				for (n = 1; n <= npids; n++) {
+					if ((pid = list[n]) in seen) continue
+					pids = pids " " pid
+					seen[pid]
+				}
+			}
+			END { print substr(pids, 2) }
+			' )
+		fi
+	fi
+
+	#
+	# Find open NFS *file* descriptors
 	#
 	if [ ! "$IGNORE_RUNNING" ]; then
 		exec 3<&1
-
-		#
-		# Find matching processes and their children
-		#
-		if [ "$FILTER_FOLLOW" ]; then
-			if [ "$FILTER_PID" ]; then
-				FOLLOW_PIDS=$( pstree -p $FILTER_PID | awk \
-					-v filter_group="$FILTER_GROUP" \
-					-v filter_user="$FILTER_USER" '
-				BEGIN { delete seen }
-				function del(re){gsub(re,"")}
-				function space(re){gsub(re," ")}
-				function check_group(pid,        file, gid, L) {
-					if (filter_group == "") return 1 # OK
-					gid = ""
-					file = sprintf("/proc/%d/status", pid)
-					while (getline L < file > 0) {
-						if (L !~ /^Gid:/) next
-						sub(/^Gid:[[:space:]]*/, "", L)
-						sub(/[^0-9].*/, "", L)
-						gid = L
-						break
-					}
-					close(file)
-					return gid == filter_group
-				}
-				function check_user(pid,        file, uid, L) {
-					if (filter_user == "") return 1 # OK
-					uid = ""
-					file = sprintf("/proc/%d/status", pid)
-					while (getline L < file > 0) {
-						if (L !~ /^Uid:/) next
-						sub(/^Uid:[[:space:]]*/, "", L)
-						sub(/[^0-9].*/, "", L)
-						uid = L
-						break
-					}
-					close(file)
-					return uid == filter_user
-				}
-				match($0, /^[^[:space:](]+\([0-9]+\)/) {
-					pid = substr($0, 1, RLENGTH - 1)
-					$0 = substr($0, RLENGTH + 1)
-					sub(/.*\(/, "", pid)
-					if (!(pid in seen))
-						pids = pids " " pid
-				}
-				{
-					space("[^0-9]")
-					space("[[:space:]]+")
-					del("(^[[:space:]]+|[[:space:]]+$)")
-					npids = split($0, list)
-					for (n = 1; n <= npids; n++) {
-						if ((pid = list[n]) in seen)
-							continue
-
-						# group filter
-						if (!check_group(pid)) continue
-
-						# user filter
-						if (!check_user(pid)) continue
-
-						pids = pids " " pid
-						seen[pid]
-					}
-				}
-				END { print substr(pids, 2) }
-				' )
-			else
-				FOLLOW_PIDS=$( pgrep ${COMM:+"$COMM"} \
-					${FILTER_USER:+-U "$FILTER_USER"} \
-					${FILTER_GROUP:+-G "$FILTER_GROUP"} |
-					awk '
-				BEGIN { delete seen }
-				function del(re){gsub(re,"")}
-				function space(re){gsub(re," ")}
-				match($0, /^[^[:space:](]+\([0-9]+\)/) {
-					pid = substr($0, 1, RLENGTH - 1)
-					$0 = substr($0, RLENGTH + 1)
-					sub(/.*\(/, "", pid)
-					if (!(pid in seen))
-						pids = pids " " pid
-				}
-				{
-					space("[^0-9]")
-					space("[[:space:]]+")
-					del("(^[[:space:]]+|[[:space:]]+$)")
-					npids = split($0, list)
-					for (n = 1; n <= npids; n++) {
-						if ((pid = list[n]) in seen)
-							continue
-						pids = pids " " pid
-						seen[pid]
-					}
-				}
-				END { print substr(pids, 2) }
-				' )
-			fi
-		fi
-
-		#
-		# Find open NFS *file* descriptors
-		#
 		OPEN_FDS=$( lsofN | awk \
 			-v comm="$COMM" \
 			-v filter_follow=${FILTER_FOLLOW:-0} \
