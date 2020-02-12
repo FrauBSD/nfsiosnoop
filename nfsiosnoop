@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 18:11:34 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 18:35:57 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-rc-6 $'
+VERSION='$Version: 4.0-rc-7 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -768,18 +768,20 @@ TRACE_PATHS`}
 		\$count = args->count;
 
 		// Pass args to sys_exit_read
+		@read_exit[tid] = 1;
 		@read_fd[tid] = \$fd;
 		@read_count[pid, \$fd] = \$count;
 	}
 
 	tracepoint:syscalls:sys_exit_read
-	/@read_fd[tid]/
+	/@read_exit[tid]/
 	{
 		\$fd = @read_fd[tid];
 		\$count = @read_count[pid, \$fd];
 		\$ret = args->ret;
 
 		// Args from sys_enter_read
+		delete(@read_exit[tid]);
 		delete(@read_fd[tid]);
 		delete(@read_count[pid, \$fd]);
 ${TIME_FMT:+
@@ -795,18 +797,20 @@ ${TIME_FMT:+
 		\$count = args->count;
 
 		// Pass args to sys_exit_write
+		@write_exit[tid] = 1;
 		@write_fd[tid] = \$fd;
 		@write_count[pid, \$fd] = \$count;
 	}
 
 	tracepoint:syscalls:sys_exit_write
-	/@write_fd[tid]/
+	/@write_exit[tid]/
 	{
 		\$fd = @write_fd[tid];
 		\$count = @write_count[pid, \$fd];
 		\$ret = args->ret;
 
 		// Args from sys_enter_write
+		delete(@write_exit[tid]);
 		delete(@write_fd[tid]);
 		delete(@write_count[pid, \$fd]);
 ${TIME_FMT:+
@@ -819,6 +823,7 @@ ${TIME_FMT:+
 		clear(@follow);}
 		clear(@dup_fd);
 		clear(@read_count);
+		clear(@read_exit);
 		clear(@read_fd);
 		clear(@trace);
 		clear(@vfs_open);
@@ -826,6 +831,7 @@ ${TIME_FMT:+
 		clear(@vfs_openat);
 		clear(@vfs_openat_nfs);
 		clear(@write_count);
+		clear(@write_exit);
 		clear(@write_fd);
 	}
 EOF
@@ -941,7 +947,7 @@ EOF
 	timefmt != "" {
 		if (time == "" || time < 0) next
 	}
-	NF < 6 { next }
+	NF < 6 { next } # Malformed input
 	{
 		call = $2
 		user = $3
@@ -960,6 +966,7 @@ EOF
 	}
 
 	call == "exit_open" || call == "exit_openat" {
+		if (NF < 7) next # Malformed input
 		if ($7 != 1) { # Not NFS
 			if (show_paths)
 				delete filename_cache[pid]
@@ -982,6 +989,7 @@ EOF
 	}
 
 	call == "dup" {
+		if (NF < 7) next # Malformed input
 		newfd = $7
 		if (show_paths) {
 			filename = filename_cache[key(pid, fd)]
@@ -997,6 +1005,7 @@ EOF
 	}
 
 	call == "dup2" || call == "dup3" {
+		if (NF < 7) next # Malformed input
 		newfd = $7
 		if (show_paths) {
 			filename = filename_cache[key(pid, fd)]
@@ -1029,6 +1038,7 @@ EOF
 	}
 
 	call == "read" || call == "write" {
+		if (NF < 8) next # Malformed input
 		ret = $8
 		if (quiet && ret == 0) next
 		count = $7
