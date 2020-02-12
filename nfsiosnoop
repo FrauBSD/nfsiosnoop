@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-12 10:54:33 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-12 11:23:30 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-rc-8 $'
+VERSION='$Version: 4.0 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -838,7 +838,11 @@ EOF
 		# NB: Might die immediately for some unknown reason
 		#
 		sleep 1
-		kill -0 $pid 2> /dev/null || exit
+		if ! kill -0 $pid 2> /dev/null; then
+			wait $pid > /dev/null 2>&1 # Collect exit status
+			echo EXIT:$? # Send status to post-processor
+			exit
+		fi
 
 		#
 		# Get id of maps created in BEGIN
@@ -885,8 +889,11 @@ EOF
 	#
 	# Bring bpftrace child back to the foreground
 	#
+	exec 9<&1 # Save a copy of stdout
 	exec > /dev/null # make below fg silent (no effect on job stdout)
 	fg %1
+	wait $pid > /dev/null 2>&1 # Collect exit status
+	echo EXIT:$? >&9 # Send status to post-processor
 
 } | awk -F'|' \
 	-v cons=${CONS:-0} \
@@ -899,6 +906,8 @@ EOF
 	'################################################# BEGIN
 
 	BEGIN {
+		exit_status = 0 # SUCCESS
+
 		red   = "\033[31m"
 		green = "\033[32m"
 		cyan  = "\033[36m"
@@ -930,6 +939,7 @@ EOF
 
 	################################################## MAIN
 
+	sub(/^EXIT:/, "") { exit_status = $0; next }
 	debug { sub(/^\t/, ""); fprint(); next }
 	raw { fprint(); next }
  	/^Attaching [0-9]+ probes/ { eprint(); next }
@@ -1046,6 +1056,10 @@ EOF
 		}
 		next
 	}
+
+	################################################## END
+
+	END { exit exit_status }
 ' # END-QUOTE
 
 ################################################################################
