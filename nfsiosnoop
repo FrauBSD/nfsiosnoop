@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 15:54:25 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-11 16:51:27 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0-rc-2 $'
+VERSION='$Version: 4.0-rc-3 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -32,8 +32,8 @@ FILTER_USER=			# -u user
 IGNORE_RUNNING=			# -n
 QUIET=				# -q
 RAW_OUTPUT=			# -r
+SHOW_PATHS=1			# -F
 TIME_FMT="$DEFAULT_TIME_FMT"	# -t fmt
-VERBOSE=1			# -q
 
 #
 # Miscellaneous
@@ -50,6 +50,7 @@ MAP_ID2=
 OPEN_CONDITION=
 OPEN_FDS=
 RAW_TIME_FMT='"%s"'
+TRACE_PATHS=1
 
 ############################################################ FUNCTIONS
 
@@ -76,6 +77,7 @@ usage()
 	printf "Usage: %s [OPTIONS] [comm]\n" "$pgm"
 	printf "Options:\n"
 	printf "$optfmt" "-d" "Debug. Print script and exit."
+	printf "$optfmt" "-F" "Do not display file/directory paths."
 	printf "$optfmt" "-f" "Follow descendents of matching processes."
 	printf "$optfmt" "-h" "Print usage statement and exit."
 	printf "$optfmt" "-n" "Ignore already-running processes."
@@ -202,13 +204,14 @@ bpf_map_ids()
 #
 # Process command-line options
 #
-while getopts dfg:hnqrt:u:V flag; do
+while getopts dFfg:hnqrt:u:V flag; do
 	case "$flag" in
 	d) DEBUG=1 ;;
+	F) SHOW_PATHS= ;;
 	f) FILTER_FOLLOW=1 ;;
 	g) FILTER_GROUP="$OPTARG" ;;
 	n) IGNORE_RUNNING=1 ;;
-	q) QUIET=1 VERBOSE= ;;
+	q) QUIET=1 ;;
 	r) RAW_OUTPUT=1 ;;
 	t) TIME_FMT="$OPTARG" ;;
 	u) FILTER_USER="$OPTARG" ;;
@@ -230,6 +233,13 @@ COMM="$1"
 #
 [ ! "$FILTER_FOLLOW" ] || [ "$COMM$FILTER_GROUP$FILTER_USER" ] ||
 	die "\`-f' requires \`-u user', \`-g group', or \`comm'"
+
+#
+# Process `-F' and `-q' command-line options
+#
+if [ "$QUIET" -a ! "$SHOW_PATHS" ]; then
+	TRACE_PATHS=
+fi
 
 #
 # Process user/group options
@@ -332,9 +342,9 @@ fi
 			-v filter_group="$FILTER_GROUP" \
 			-v filter_user="$FILTER_USER" \
 			-v follow_pids="$FOLLOW_PIDS" \
-			-v timefmt="$TIME_FMT" \
+			-v show_paths=${SHOW_PATHS:-0} \
 			-v stderr=/dev/stderr \
-			-v verbose=${VERBOSE:-0} \
+			-v timefmt="$TIME_FMT" \
 		'####################################### BEGIN
 
 		BEGIN {
@@ -393,7 +403,7 @@ fi
 			filename = $0
 			sub("^[^/]*/", "/", filename)
 			sub(/ \([^)]+\)$/, "", filename)
-			if (verbose) {
+			if (show_paths) {
 				printf "%s|enter_open|%s|%s|%u|%s\n",
 					timefmt == "" ? "" : time,
 					user, cmd, pid, filename
@@ -482,13 +492,13 @@ cat <<PROBE
 	${OPEN_CONDITION:+/$OPEN_CONDITION/
 	}{
 		delete(@vfs_${name}_nfs[tid]); // Flag from vfs_open
-		@vfs_$name[tid] = 1; // Flag for vfs_open${VERBOSE:+
-`cat <<VERBOSE
+		@vfs_$name[tid] = 1; // Flag for vfs_open${TRACE_PATHS:+
+`cat <<TRACE_PATHS
 ${TIME_FMT:+
 		time($RAW_TIME_FMT);}
 		printf("|${func#sys_}|%d.%d|%s|%d|%s\n",
 			uid, gid, comm, pid, str(args->filename));
-VERBOSE`}
+TRACE_PATHS`}
 	}
 
 PROBE
@@ -546,8 +556,8 @@ cat <<PROBE
 			\$fd = (uint64)\$ret;
 
 			// Set flag to trace read/write on fd
-			@trace[pid, \$fd] = 1;${VERBOSE:+
-`cat <<VERBOSE
+			@trace[pid, \$fd] = 1;${TRACE_PATHS:+
+`cat <<TRACE_PATHS
 ${TIME_FMT:+
 			time($RAW_TIME_FMT);}
 			printf("|${func#sys_}|%d.%d|%s|%d|%d|1\n",
@@ -558,7 +568,7 @@ ${TIME_FMT:+
 			time($RAW_TIME_FMT);}
 			printf("|${func#sys_}|%d.%d|%s|%d|%d|0\n",
 				uid, gid, comm, pid, \\\$fd);
-VERBOSE`}
+TRACE_PATHS`}
 		}
 	}
 
@@ -644,12 +654,12 @@ ${TIME_FMT:+
 		\$fd = args->fd;
 
 		delete(@trace[pid, \$fd]); // Stop tracing read/write on fd
-${VERBOSE:+
-`cat <<VERBOSE
+${TRACE_PATHS:+
+`cat <<TRACE_PATHS
 ${TIME_FMT:+
 		time($RAW_TIME_FMT);}
 		printf("|close|%d.%d|%s|%d|%d\n", uid, gid, comm, pid, \\\$fd);
-VERBOSE`}
+TRACE_PATHS`}
 	}
 
 	/*
@@ -790,7 +800,7 @@ EOF
 	-v debug=${DEBUG:-0} \
 	-v quiet=${QUIET:-0} \
 	-v raw=${RAW_OUTPUT:-0} \
-	-v verbose=${VERBOSE:-0} \
+	-v show_paths=${SHOW_PATHS:-0} \
 	-v stderr=/dev/stderr \
 	-v timefmt="$TIME_FMT" \
 	'################################################# BEGIN
@@ -855,52 +865,70 @@ EOF
 	}
 
 	call == "exit_open" || call == "exit_openat" {
+		if ($7 != 1) { # Not NFS
+			if (show_paths)
+				delete filename_cache[pid]
+			next
+		}
+		# NFS
 		callname = substr(call, 6)
-		if ($7 == 1) { # NFS
+		if (show_paths) {
 			filename = filename_cache[pid]
 			delete filename_cache[pid]
 			filename_cache[key(pid, fd)] = filename
-			if (verbose && !quiet) {
+			if (!quiet) {
 				emit(green, sprintf("%s(filename=%s) = %d",
 					callname, filename, fd))
 			}
-		} else {
-			delete filename_cache[pid]
+		} else if (!quiet) {
+			emit(green, sprintf("%s() = %d", callname, fd))
 		}
 		next
 	}
 
 	call == "dup" {
-		if (!verbose) next
-		filename = filename_cache[key(pid, fd)]
 		newfd = $7
-		filename_cache[key(pid, newfd)] = filename
-		if (!quiet) {
-			emit(green, sprintf("dup(fd=%d <%s>) = %d",
-				fd, filename, newfd))
+		if (show_paths) {
+			filename = filename_cache[key(pid, fd)]
+			filename_cache[key(pid, newfd)] = filename
+			if (!quiet) {
+				emit(green, sprintf("dup(fd=%d <%s>) = %d",
+					fd, filename, newfd))
+			}
+		} else if (!quiet) {
+			emit(green, sprintf("dup(fd=%d) = %d", fd, newfd))
 		}
 		next
 	}
 
 	call == "dup2" || call == "dup3" {
-		if (!verbose) next
-		filename = filename_cache[key(pid, fd)]
 		newfd = $7
-		filename_cache[key(pid, newfd)] = filename
-		if (!quiet) {
-			emit(green, sprintf("%s(oldfd=%d <%s>, newfd=%d)",
-				call, fd, filename, newfd))
+		if (show_paths) {
+			filename = filename_cache[key(pid, fd)]
+			filename_cache[key(pid, newfd)] = filename
+			if (!quiet) {
+				emit(green,
+					sprintf("%s(oldfd=%d <%s>, newfd=%d)",
+					call, fd, filename, newfd))
+			}
+		} else if (!quiet) {
+			emit(green, sprintf("%s(oldfd=%d, newfd=%d)",
+				call, fd, newfd))
 		}
 		next
 	}
 
 	call == "close" {
-		if (!verbose) next
-		k = key(pid, fd)
-		filename = filename_cache[k]
-		delete filename_cache[k]
-		if (!quiet) {
-			emit(green, sprintf("close(fd=%d <%s>)", fd, filename))
+		if (show_paths) {
+			k = key(pid, fd)
+			filename = filename_cache[k]
+			if (!quiet) {
+				emit(green, sprintf("close(fd=%d <%s>)",
+					fd, filename))
+			}
+			delete filename_cache[k]
+		} else if (!quiet) {
+			emit(green, sprintf("close(fd=%d)", fd))
 		}
 		next
 	}
@@ -909,12 +937,12 @@ EOF
 		ret = $8
 		if (quiet && ret == 0) next
 		count = $7
-		filename = filename_cache[key(pid, fd)]
-		if (verbose) {
+		if (show_paths) {
+			filename = filename_cache[key(pid, fd)]
 			emit(call == "read" ? cyan : red,
 				sprintf("%s(fd=%d <%s>, count=%ld) = %ld",
 				call, fd, filename, count, ret))
-		} else if (ret > 0) {
+		} else {
 			emit(call == "read" ? cyan : red,
 				sprintf("%s(fd=%d, count=%ld) = %ld",
 				call, fd, count, ret))
