@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-14 15:52:28 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-14 15:54:28 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1-alpha-1 $'
+VERSION='$Version: 4.1-alpha-2 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -60,7 +60,7 @@ die()
 	local fmt="$1"
 	if [ "$fmt" ]; then
 		shift 1 # fmt
-		printf "%s: $fmt\n" "$pgm" "$@"
+		printf "%s: $fmt\n" "$pgm" "$@" >&2
 	fi
 	exit $FAILURE
 }
