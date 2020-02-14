@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-12 11:23:30 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-14 15:52:28 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.0 $'
+VERSION='$Version: 4.1-alpha-1 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -46,8 +46,8 @@ FILTER_GID=
 FILTER_UID=
 FOLLOW_PIDS=
 FORK_CONDITION=
-MAP_ID1=
-MAP_ID2=
+MAP_ID_FOLLOW=
+MAP_ID_TRACE=
 OPEN_CONDITION=
 OPEN_FDS=
 RAW_TIME_FMT='"%s"'
@@ -114,6 +114,36 @@ count()
 	local __var_to_set="$1"
 	shift 1 # var_to_set
 	eval $__var_to_set=$#
+}
+
+getword()
+{
+	local funcname=getword
+	local OPTIND=1 OPTARG __flag
+	local __delim="$IFS"
+	local __var_to_set=
+	local __word=
+
+	while getopts d:s:w: __flag; do
+		case "$__flag" in
+		d) __delim="$OPTARG" ;;
+		s) __var_to_set="$OPTARG" ;;
+		w) __word="$OPTARG" ;;
+		esac
+	done
+	shift $(( $OPTIND - 1 ))
+
+	case "$__word" in
+	""|*[!0-9]*) die "$funcname: \`-w' requires a number" ;;
+	esac
+
+	local IFS="$__delim"
+	set -- $*
+	if [ "$__var_to_set" ]; then
+		eval $__var_to_set=\"\$\{$__word\}\"
+	else
+		eval echo \"\$\{$__word\}\"
+	fi
 }
 
 num2bytes()
@@ -853,35 +883,34 @@ EOF
 		#
 		# Store map ids
 		#
-		MAP_ID1=${map_ids%%,*}
-		MAP_ID2=${map_ids#*,}
-		MAP_ID2=${MAP_ID2%%,*}
+		getword -w 1 -s MAP_ID_TRACE  -d , $map_ids
+		getword -w 2 -s MAP_ID_FOLLOW -d , $map_ids
 	fi
 
 	#
 	# Update map entries
 	#
-	if [ "$OPEN_FDS" -a "$MAP_ID1" ]; then
+	if [ "$OPEN_FDS" -a "$MAP_ID_TRACE" ]; then
 		count cnt $OPEN_FDS
 		info "Loading $cnt fds into bpftrace map" \
-			"(pid $pid, prog $prog_id, map $MAP_ID1)..."
+			"(pid $pid, prog $prog_id, map $MAP_ID_TRACE)..."
 		for pid_fd in $OPEN_FDS; do
 			pid="${pid_fd%%:*}" fd="${pid_fd#*:}"
 			num2bytes $pid 8B map_pid
 			num2bytes $fd  8B map_fd
 			num2bytes 1    8B map_value
-			echo map update id $MAP_ID1 \
+			echo map update id $MAP_ID_TRACE \
 				key $map_pid $map_fd value $map_value
 		done | bpftool batch file /dev/stdin
 	fi
-	if [ "$FOLLOW_PIDS" -a "$MAP_ID2" ]; then
+	if [ "$FOLLOW_PIDS" -a "$MAP_ID_FOLLOW" ]; then
 		count cnt $FOLLOW_PIDS
 		info "Loading $cnt pids into bpftrace map" \
-			"(pid $pid, prog $prog_id, map $MAP_ID2)..."
+			"(pid $pid, prog $prog_id, map $MAP_ID_FOLLOW)..."
 		for pid in $FOLLOW_PIDS; do
 			num2bytes $pid 8B map_key
 			num2bytes 1    8B map_value
-			echo map update id $MAP_ID2 \
+			echo map update id $MAP_ID_FOLLOW \
 				key $map_key value $map_value
 		done | bpftool batch file /dev/stdin
 	fi
