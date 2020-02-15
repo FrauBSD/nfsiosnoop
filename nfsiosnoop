@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-14 16:01:28 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-14 16:04:14 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1-alpha-6 $'
+VERSION='$Version: 4.1-alpha-7 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -518,10 +518,12 @@ fi
 			if (show_paths) {
 				printf "%s|enter_open|%s|%s|%d|%s\n",
 					timefmt == "" ? "" : time,
-					user, cmd, pid, filename
+					user, cmd, pid,
+					filename
 			}
 			printf "%s|exit_open|%s|%s|%d|%d|1\n",
-				timefmt == "" ? "" : time, user, cmd, pid, fd
+				timefmt == "" ? "" : time, user, cmd, pid,
+				fd
 
 			#
 			# Save information for later bpftool
@@ -617,7 +619,8 @@ cat <<PROBE
 ${TIME_FMT:+
 		time($RAW_TIME_FMT);}
 		printf("|${func#sys_}|%d.%d|%s|%d|%s\n",
-			uid, gid, comm, pid, str(args->filename));
+			uid, gid, comm, pid,
+			str(args->filename));
 TRACE_PATHS`}
 	}
 
@@ -681,13 +684,15 @@ cat <<PROBE
 ${TIME_FMT:+
 			time($RAW_TIME_FMT);}
 			printf("|${func#sys_}|%d.%d|%s|%d|%d|1\n",
-				uid, gid, comm, pid, \\\$fd);
+				uid, gid, comm, pid,
+				\\\$fd);
 		}
 		else
 		{${TIME_FMT:+
 			time($RAW_TIME_FMT);}
 			printf("|${func#sys_}|%d.%d|%s|%d|%d|0\n",
-				uid, gid, comm, pid, \\\$fd);
+				uid, gid, comm, pid,
+				\\\$fd);
 TRACE_PATHS`}
 		}
 	}
@@ -722,7 +727,8 @@ done )
 ${TIME_FMT:+
 			time($RAW_TIME_FMT);}
 			printf("|dup|%d.%d|%s|%d|%d|",
-				uid, gid, comm, pid, \$oldfd);
+				uid, gid, comm, pid,
+				\$oldfd);
 			printf("%d\n", \$newfd);
 		}
 
@@ -741,7 +747,8 @@ ${TIME_FMT:+
 ${TIME_FMT:+
 			time($RAW_TIME_FMT);}
 			printf("|dup2|%d.%d|%s|%d|%d|",
-				uid, gid, comm, pid, \$oldfd);
+				uid, gid, comm, pid,
+				\$oldfd);
 			printf("%d\n", \$newfd);
 		}
 	}
@@ -759,7 +766,8 @@ ${TIME_FMT:+
 ${TIME_FMT:+
 			time($RAW_TIME_FMT);}
 			printf("|dup3|%d.%d|%s|%d|%d|",
-				uid, gid, comm, pid, \$oldfd);
+				uid, gid, comm, pid,
+				\$oldfd);
 			printf("%d\n", \$newfd);
 		}
 	}
@@ -778,7 +786,9 @@ ${TRACE_PATHS:+
 `cat <<TRACE_PATHS
 ${TIME_FMT:+
 		time($RAW_TIME_FMT);}
-		printf("|close|%d.%d|%s|%d|%d\n", uid, gid, comm, pid, \\\$fd);
+		printf("|close|%d.%d|%s|%d|%d\n",
+			uid, gid, comm, pid,
+			\\\$fd);
 TRACE_PATHS`}
 	}
 
@@ -811,7 +821,9 @@ TRACE_PATHS`}
 		delete(@read_count[pid, \$fd]);
 ${TIME_FMT:+
 		time($RAW_TIME_FMT);}
-		printf("|read|%d.%d|%s|%d|%d|", uid, gid, comm, pid, \$fd);
+		printf("|read|%d.%d|%s|%d|%d|",
+			uid, gid, comm, pid,
+			\$fd);
 		printf("%ld|%ld\n", \$count, \$ret);
 	}
 
@@ -840,7 +852,9 @@ ${TIME_FMT:+
 		delete(@write_count[pid, \$fd]);
 ${TIME_FMT:+
 		time($RAW_TIME_FMT);}
-		printf("|write|%d.%d|%s|%d|%d|", uid, gid, comm, pid, \$fd);
+		printf("|write|%d.%d|%s|%d|%d|",
+			uid, gid, comm, pid,
+			\$fd);
 		printf("%ld|%ld\n", \$count, \$ret);
 	}
 
@@ -964,7 +978,9 @@ EOF
 				cons ? color : "", strftime(timefmt, time),
 				cons ? frset : "", user, cmd, pid, str;
 		} else {
-			printf "%s %s[%d]: %s\n", user, cmd, pid, str;
+			printf "%s %s[%d]: %s\n",
+				user, cmd, pid,
+				str;
 		}
 		fflush()
 	}
