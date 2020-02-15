@@ -9,7 +9,7 @@ Group: Applications/FrauBSD
 
 Summary: nfsiosnoop
 License: BSD
-Version: 4.0
+Version: 4.1
 Release: 1
 Buildarch: noarch
 
@@ -21,8 +21,10 @@ BuildRoot: %{_tmppath}/src
 
 Requires: /bin/awk
 Requires: /bin/sh
-Requires: bpftrace
 Requires: bpftool
+Requires: bpftrace
+Requires: lsof
+Requires: psmisc
 
 ############################################################ DESCRIPTION
 
@@ -76,6 +78,20 @@ WWW: https://www.fraubsd.org/nfsiosnoop
 
 
 %changelog
+* Fri Feb 14 2020 Devin Teske <dteske@fraubsd.org> 4.1-1
+- Add psmisc and lsof dependencies to SPECFILE
+- e954f34 Implement simple message passing for debugging
+- 43c967c Wait indefinitely for bpftrace to initialize
+- 56802d2 Add support for nfs4
+- 8212f69 Reduce diff to non-community edition
+- c585ebb Show error messages from awk, if any
+- b6a60a7 Whitespace (grouping base fields together)
+- 3cd2eab Replace %u with %d and comment user fmt
+- 5faa1a7 Add informational messages
+- eb69e05 Make `-d' faster
+- d4c39be Disassociate stdout dup from `-n'
+- c5e02d9 Send all informational messages to stderr
+- 0ec3d56 Improve method for extracting map ids
 * Wed Feb 12 2020 Devin Teske <dteske@fraubsd.org> 4.0-1
 - 1592133 Preserve bpftrace exit status
 - af0bfa4 Reduce indentation level
