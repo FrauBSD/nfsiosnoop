@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-14 16:10:20 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-14 16:12:06 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1-beta-2 $'
+VERSION='$Version: 4.1 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -959,10 +959,11 @@ EOF
 	BEGIN {
 		exit_status = 0 # SUCCESS
 
-		red   = "\033[31m"
-		green = "\033[32m"
-		cyan  = "\033[36m"
-		frset = "\033[39m"
+		red     = "\033[31m"
+		green   = "\033[32m"
+		magenta = "\033[35m"
+		cyan    = "\033[36m"
+		fgreset = "\033[39m"
 
 		srand() # Seed clock
 		tlim = srand() * 2 # limit time outliers
@@ -974,6 +975,13 @@ EOF
 	function fprint() { print; fflush() }
 	function eprint() { print > stderr; fflush(stderr) }
 
+	function info(str)
+	{
+		printf "%sINFO%s %s\n",
+			cons ? magenta : "", cons ? fgreset : "", str > stderr
+		fflush(stderr)
+	}
+
 	function emit(color, str)
 	{
 		if (timefmt != "") {
@@ -981,7 +989,8 @@ EOF
 				return
 			printf "%s%s%s %s %s[%d]: %s\n",
 				cons ? color : "", strftime(timefmt, time),
-				cons ? frset : "", user, cmd, pid, str;
+				cons ? fgreset : "", user, cmd, pid,
+				str;
 		} else {
 			printf "%s %s[%d]: %s\n",
 				user, cmd, pid,
@@ -997,14 +1006,25 @@ EOF
 	raw { fprint(); next }
  	/^Attaching [0-9]+ probes/ { eprint(); next }
 
-	# Fields
+	# Base fields
 	{ time = $1 }
 	timefmt != "" {
 		if (time == "" || time < 0) next
 	}
+	{ call = $2 }
+
+	# Message passing
+	call == "info" {
+		msg = $0
+		for (n = 1; n <= 2; n++)
+			sub(/^[^|]*\|/, "", msg)
+		info(msg)
+		next
+	}
+
+	# Common fields
 	NF < 6 { next } # Malformed input
 	{
-		call = $2
 		user = $3 # uid.gid
 		cmd = $4
 		pid = $5
