@@ -9,7 +9,7 @@ Group: Applications/FrauBSD
 
 Summary: nfsiosnoop
 License: BSD
-Version: 4.1
+Version: 4.1.1
 Release: 1
 Buildarch: noarch
 
@@ -78,6 +78,8 @@ WWW: https://www.fraubsd.org/nfsiosnoop
 
 
 %changelog
+* Sun Feb 16 2020 Devin Teske <dteske@fraubsd.org> 4.1.1-1
+- e73f8d3 Reduce diff between beegfsiosnoop
 * Fri Feb 14 2020 Devin Teske <dteske@fraubsd.org> 4.1-1
 - Add psmisc and lsof dependencies to SPECFILE
 - e954f34 Implement simple message passing for debugging
