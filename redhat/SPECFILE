@@ -9,7 +9,7 @@ Group: Applications/FrauBSD
 
 Summary: nfsiosnoop
 License: BSD
-Version: 4.1.1
+Version: 4.1.2
 Release: 1
 Buildarch: noarch
 
@@ -78,6 +78,20 @@ WWW: https://www.fraubsd.org/nfsiosnoop
 
 
 %changelog
+* Sun Feb 16 2020 Devin Teske <dteske@fraubsd.org> 4.1.2-1
+- 3dc28b0 Print messages after loading is complete
+- c5805b4 Protect against NULL caching
+- 65def80 Use getword to extract pid/fd tuples
+- 43d8a3a Refactor collection of map ids
+- 572b45b Add end comment to bpftrace code
+- a9e2970 Refactor clearing of function-based maps
+- e60f07e Move comment
+- 9c12e06 Fix an off-by-one error
+- 57eaf6f Explicitly skip header
+- a015f09 Prevent duplicate reporting [pedantic]
+- fed2ebb Add ability to send informational messages from lsof processor
+- 2275d34 Whitespace (no functional changes)
+- 4039e68 Refactor count() to support delimiters
 * Sun Feb 16 2020 Devin Teske <dteske@fraubsd.org> 4.1.1-1
 - e73f8d3 Reduce diff between beegfsiosnoop
 * Fri Feb 14 2020 Devin Teske <dteske@fraubsd.org> 4.1-1
