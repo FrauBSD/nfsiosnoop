@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:25:26 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:26:37 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.2-rc-1 $'
+VERSION='$Version: 4.1.2-rc-2 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -952,28 +952,29 @@ done )
 //////////////////////////////////////////////////////////////////////
 EOF
 	pid=$!
+	prog_id=
+	map_ids=
 
 	#
 	# Identify child bpftrace
 	#
 	if [ "$OPEN_FDS$FOLLOW_PIDS" -a ! "$DEBUG" ]; then
 		info "Waiting for bpftrace to initialize..."
-		prog_id=
-		while kill -0 $pid 2> /dev/null && [ ! "$prog_id" ]; do
+		while kill -0 $pid 2> /dev/null; do
+			if [ ! "$prog_id" ]; then
+				bpf_prog_id $pid BEGIN prog_id
+			elif [ ! "$map_ids" ]; then
+				bpf_map_ids $prog_id map_ids
+			else
+				break
+			fi
 			sleep 1
-			bpf_prog_id $pid BEGIN prog_id
 		done
 		if ! kill -0 $pid 2> /dev/null; then
 			wait $pid > /dev/null 2>&1 # Collect exit status
 			echo EXIT:$? # Send status to post-processor
 			exit
 		fi
-
-		#
-		# Get id of maps created in BEGIN
-		#
-		bpf_prog_id $pid BEGIN prog_id
-		bpf_map_ids $prog_id map_ids
 
 		#
 		# Store map ids
