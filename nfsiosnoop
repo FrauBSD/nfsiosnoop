@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:31:23 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 20:54:48 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.2 $'
+VERSION='$Version: 4.1.3 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -311,7 +311,7 @@ esac
 case "$FILTER_GROUP" in
 "") : leave-empty ;;
 *[!0-9]*) # Translate from name to GID
-	FILTER_GID=$( 
+	FILTER_GID=$(
 		getent group "$FILTER_GROUP" | awk -F: '{print $3}'
 	) || exit
 	;;
@@ -855,6 +855,7 @@ done )
 
 		delete(@trace[pid, \$fd]); // Stop tracing read/write on fd
 ${TRACE_PATHS:+`cat <<TRACE_PATHS
+
 		${TIME_FMT:+time($RAW_TIME_FMT);
 		}printf("|close|%d.%d|%s|%d|%d\n",
 			uid, gid, comm, pid,
