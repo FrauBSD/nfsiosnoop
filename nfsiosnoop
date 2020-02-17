@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:20:29 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:21:44 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.2-beta-5 $'
+VERSION='$Version: 4.1.2-beta-6 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -723,10 +723,10 @@ cat <<PROBE
 		\$fstype = \$type->name;
 
 		//
-		// Test filesystem type
+		// Test filesystem type (for $exit_func)
 		//
 		if (str(\$fstype, 3) == "nfs") {
-			@vfs_${name}_trace[tid] = 1; // Flag for $exit_func
+			@vfs_${name}_trace[tid] = 1;
 		}
 	}
 
