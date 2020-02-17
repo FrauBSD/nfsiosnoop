@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:18:46 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:19:40 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.2-beta-4 $'
+VERSION='$Version: 4.1.2-beta-5 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -499,6 +499,9 @@ fi
 		}
 
 		######################################## MAIN
+
+		# Skip header
+		$1 == "COMMAND" && $2 == "PID" && $NF == "NAME" { next }
 
 		# Parse fields
 		{
