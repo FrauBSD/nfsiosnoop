@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:15:38 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:17:14 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.2-beta-2 $'
+VERSION='$Version: 4.1.2-beta-3 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -456,6 +456,7 @@ fi
 		info "Gathering open file-descriptor info..."
 		OPEN_FDS=$( run_lsof | awk \
 			-v comm="$COMM" \
+			-v debug=${DEBUG:-0} \
 			-v filter_follow=${FILTER_FOLLOW:-0} \
 			-v filter_group="$FILTER_GROUP" \
 			-v filter_pid="$FILTER_PID" \
@@ -477,6 +478,20 @@ fi
 			for (n = 1; n <= nfollow; n++) {
 				follow[list[n]]
 			}
+		}
+
+		######################################## FUNCTIONS
+
+		function emit(str)
+		{
+			if (debug) return
+			printf "%s|%s\n", time, str
+			fflush()
+		}
+
+		function info(str)
+		{
+			emit(sprintf("info|%s", str))
 		}
 
 		######################################## MAIN
