@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:26:37 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:28:38 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.2-rc-2 $'
+VERSION='$Version: 4.1.2-rc-3 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -991,7 +991,8 @@ EOF
 		info "Loading $cnt fds into bpftrace map" \
 			"(pid $pid, prog $prog_id, map $MAP_ID_TRACE)..."
 		for pid_fd in $OPEN_FDS; do
-			pid="${pid_fd%%:*}" fd="${pid_fd#*:}"
+			getword -w 1 -s pid -d : $pid_fd
+			getword -w 2 -s fd  -d : $pid_fd
 			num2bytes $pid 8B map_pid
 			num2bytes $fd 8B map_fd
 			num2bytes 1 8B map_value
