@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:09:18 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:15:38 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.2-beta-1 $'
+VERSION='$Version: 4.1.2-beta-2 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -357,7 +357,7 @@ fi
 	# Find matching processes and their children
 	#
 	if [ "$FILTER_FOLLOW" -a ! "$IGNORE_RUNNING$DEBUG" ]; then
-		info "Gathering active process info ..."
+		info "Gathering active process info..."
 		if [ "$FILTER_PID" ]; then
 			FOLLOW_PIDS=$( pstree -p $FILTER_PID | awk \
 				-v filter_group="$FILTER_GROUP" \
@@ -453,7 +453,7 @@ fi
 	# Find open *file* descriptors
 	#
 	if [ ! "$IGNORE_RUNNING$DEBUG" ]; then
-		info "Gathering open file-descriptor info ..."
+		info "Gathering open file-descriptor info..."
 		OPEN_FDS=$( run_lsof | awk \
 			-v comm="$COMM" \
 			-v filter_follow=${FILTER_FOLLOW:-0} \
@@ -621,8 +621,8 @@ fi
 	{
 		@trace[-1,-1] = 1; // Required to create map
 		delete(@trace[-1,-1]); // Delete dummy entry
-${FILTER_FOLLOW:+
-		@follow[-1] = 1;
+
+		${FILTER_FOLLOW:+@follow[-1] = 1;
 		delete(@follow[-1]);}
 	}
 ${FILTER_FOLLOW:+"
@@ -656,14 +656,14 @@ cat <<PROBE
 	${OPEN_CONDITION:+/$OPEN_CONDITION/
 	}{
 		delete(@vfs_${name}_trace[tid]); // Flag from vfs_open
-		@vfs_$name[tid] = 1; // Flag for vfs_open${TRACE_PATHS:+
-`cat <<TRACE_PATHS
-${TIME_FMT:+
-		time($RAW_TIME_FMT);}
-		printf("|${func#sys_}|%d.%d|%s|%d|%s\n",
-			uid, gid, comm, pid,
-			str(args->filename));
-TRACE_PATHS`}
+		@vfs_$name[tid] = 1; // Flag for vfs_open
+
+${TRACE_PATHS:+`awk 'sub(/^\\\\/,"")||1' <<-TRACE_PATHS
+\		${TIME_FMT:+time($RAW_TIME_FMT);
+\		}printf("|${func#sys_}|%d.%d|%s|%d|%s\n",
+\			uid, gid, comm, pid,
+\			str(args->filename));
+		TRACE_PATHS`}
 	}
 
 PROBE
@@ -721,21 +721,21 @@ cat <<PROBE
 			\$fd = (uint64)\$ret;
 
 			// Set flag to trace read/write on fd
-			@trace[pid, \$fd] = 1;${TRACE_PATHS:+
-`cat <<TRACE_PATHS
-${TIME_FMT:+
-			time($RAW_TIME_FMT);}
-			printf("|${func#sys_}|%d.%d|%s|%d|%d|1\n",
-				uid, gid, comm, pid,
-				\\\$fd);
-		}
-		else
-		{${TIME_FMT:+
-			time($RAW_TIME_FMT);}
-			printf("|${func#sys_}|%d.%d|%s|%d|%d|0\n",
-				uid, gid, comm, pid,
-				\\\$fd);
-TRACE_PATHS`}
+			@trace[pid, \$fd] = 1;
+
+${TRACE_PATHS:+`awk 'sub(/^\\\\/,"")||1' <<-TRACE_PATHS
+\			${TIME_FMT:+time($RAW_TIME_FMT);
+\			}printf("|${func#sys_}|%d.%d|%s|%d|%d|1\n",
+\				uid, gid, comm, pid,
+\				\\\$fd);
+\		}
+\		else
+\		{
+\			${TIME_FMT:+time($RAW_TIME_FMT);
+\			}printf("|${func#sys_}|%d.%d|%s|%d|%d|0\n",
+\				uid, gid, comm, pid,
+\				\\\$fd);
+			TRACE_PATHS`}
 		}
 	}
 
@@ -766,9 +766,9 @@ done )
 		{
 			// Set flag to trace read/write on fd
 			@trace[pid, \$newfd] = 1;
-${TIME_FMT:+
-			time($RAW_TIME_FMT);}
-			printf("|dup|%d.%d|%s|%d|%d|",
+
+			${TIME_FMT:+time($RAW_TIME_FMT);
+			}printf("|dup|%d.%d|%s|%d|%d|",
 				uid, gid, comm, pid,
 				\$oldfd);
 			printf("%d\n", \$newfd);
@@ -786,9 +786,9 @@ ${TIME_FMT:+
 		{
 			// Set flag to trace read/write on fd
 			@trace[pid, \$newfd] = 1;
-${TIME_FMT:+
-			time($RAW_TIME_FMT);}
-			printf("|dup2|%d.%d|%s|%d|%d|",
+
+			${TIME_FMT:+time($RAW_TIME_FMT);
+			}printf("|dup2|%d.%d|%s|%d|%d|",
 				uid, gid, comm, pid,
 				\$oldfd);
 			printf("%d\n", \$newfd);
@@ -805,9 +805,9 @@ ${TIME_FMT:+
 		{
 			// Set flag to trace read/write on fd
 			@trace[pid, \$newfd] = 1;
-${TIME_FMT:+
-			time($RAW_TIME_FMT);}
-			printf("|dup3|%d.%d|%s|%d|%d|",
+
+			${TIME_FMT:+time($RAW_TIME_FMT);
+			}printf("|dup3|%d.%d|%s|%d|%d|",
 				uid, gid, comm, pid,
 				\$oldfd);
 			printf("%d\n", \$newfd);
@@ -824,11 +824,9 @@ ${TIME_FMT:+
 		\$fd = args->fd;
 
 		delete(@trace[pid, \$fd]); // Stop tracing read/write on fd
-${TRACE_PATHS:+
-`cat <<TRACE_PATHS
-${TIME_FMT:+
-		time($RAW_TIME_FMT);}
-		printf("|close|%d.%d|%s|%d|%d\n",
+${TRACE_PATHS:+`cat <<TRACE_PATHS
+		${TIME_FMT:+time($RAW_TIME_FMT);
+		}printf("|close|%d.%d|%s|%d|%d\n",
 			uid, gid, comm, pid,
 			\\\$fd);
 TRACE_PATHS`}
@@ -861,9 +859,9 @@ TRACE_PATHS`}
 		delete(@read_exit[tid]);
 		delete(@read_fd[tid]);
 		delete(@read_count[pid, \$fd]);
-${TIME_FMT:+
-		time($RAW_TIME_FMT);}
-		printf("|read|%d.%d|%s|%d|%d|",
+
+		${TIME_FMT:+time($RAW_TIME_FMT);
+		}printf("|read|%d.%d|%s|%d|%d|",
 			uid, gid, comm, pid,
 			\$fd);
 		printf("%ld|%ld\n", \$count, \$ret);
@@ -892,9 +890,9 @@ ${TIME_FMT:+
 		delete(@write_exit[tid]);
 		delete(@write_fd[tid]);
 		delete(@write_count[pid, \$fd]);
-${TIME_FMT:+
-		time($RAW_TIME_FMT);}
-		printf("|write|%d.%d|%s|%d|%d|",
+
+		${TIME_FMT:+time($RAW_TIME_FMT);
+		}printf("|write|%d.%d|%s|%d|%d|",
 			uid, gid, comm, pid,
 			\$fd);
 		printf("%ld|%ld\n", \$count, \$ret);
@@ -922,7 +920,7 @@ EOF
 	# Identify child bpftrace
 	#
 	if [ "$OPEN_FDS$FOLLOW_PIDS" -a ! "$DEBUG" ]; then
-		info "Waiting for bpftrace to initialize ..."
+		info "Waiting for bpftrace to initialize..."
 		prog_id=
 		while kill -0 $pid 2> /dev/null && [ ! "$prog_id" ]; do
 			sleep 1
@@ -957,8 +955,8 @@ EOF
 		for pid_fd in $OPEN_FDS; do
 			pid="${pid_fd%%:*}" fd="${pid_fd#*:}"
 			num2bytes $pid 8B map_pid
-			num2bytes $fd  8B map_fd
-			num2bytes 1    8B map_value
+			num2bytes $fd 8B map_fd
+			num2bytes 1 8B map_value
 			echo map update id $MAP_ID_TRACE \
 				key $map_pid $map_fd value $map_value
 		done | bpftool batch file /dev/stdin
