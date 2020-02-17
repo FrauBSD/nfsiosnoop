@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 13:23:25 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:09:18 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.1 $'
+VERSION='$Version: 4.1.2-beta-1 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -111,9 +111,25 @@ run_bpftrace()
 
 count()
 {
-	local __var_to_set="$1"
-	shift 1 # var_to_set
-	eval $__var_to_set=$#
+	local OPTIND=1 OPTARG __flag
+	local __delim="$IFS"
+	local __var_to_set=
+
+	while getopts d:s: __flag; do
+		case "$__flag" in
+		d) __delim="$OPTARG" ;;
+		s) __var_to_set="$OPTARG" ;;
+		esac
+	done
+	shift $(( $OPTIND - 1 ))
+
+	local IFS="$__delim"
+	set -- $*
+	if [ "$__var_to_set" ]; then
+		eval $__var_to_set=$#
+	else
+		echo $#
+	fi
 }
 
 getword()
@@ -935,7 +951,7 @@ EOF
 	# Update map entries
 	#
 	if [ "$OPEN_FDS" -a "$MAP_ID_TRACE" ]; then
-		count cnt $OPEN_FDS
+		count -s cnt $OPEN_FDS
 		info "Loading $cnt fds into bpftrace map" \
 			"(pid $pid, prog $prog_id, map $MAP_ID_TRACE)..."
 		for pid_fd in $OPEN_FDS; do
@@ -948,7 +964,7 @@ EOF
 		done | bpftool batch file /dev/stdin
 	fi
 	if [ "$FOLLOW_PIDS" -a "$MAP_ID_FOLLOW" ]; then
-		count cnt $FOLLOW_PIDS
+		count -s cnt $FOLLOW_PIDS
 		info "Loading $cnt pids into bpftrace map" \
 			"(pid $pid, prog $prog_id, map $MAP_ID_FOLLOW)..."
 		for pid in $FOLLOW_PIDS; do
