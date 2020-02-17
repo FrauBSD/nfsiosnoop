@@ -4,7 +4,7 @@
 #
 # $Title: Script to snoop on NFS I/O under Linux $
 # $Copyright: 2020 Devin Teske. All rights reserved. $
-# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:21:44 -0800 freebsdfrau $
+# $FrauBSD: nfsiosnoop/nfsiosnoop 2020-02-16 19:23:48 -0800 freebsdfrau $
 #
 ############################################################ DEFAULTS
 
@@ -12,7 +12,7 @@ DEFAULT_TIME_FMT="%Y %b %e %T"
 
 ############################################################ GLOBALS
 
-VERSION='$Version: 4.1.2-beta-6 $'
+VERSION='$Version: 4.1.2-beta-7 $'
 
 pgm="${0##*/}" # Program basename
 
@@ -935,10 +935,13 @@ TRACE_PATHS`}
 		clear(@read_exit);
 		clear(@read_fd);
 		clear(@trace);
-		clear(@vfs_open);
-		clear(@vfs_open_trace);
-		clear(@vfs_openat);
-		clear(@vfs_openat_trace);
+$( for func in sys_enter_open sys_enter_openat; do
+		name=${func#*enter_}
+		awk 'sub(/^\\/,"")||1' <<-CLEAR
+\		clear(@vfs_$name);
+\		clear(@vfs_${name}_trace);
+		CLEAR
+done )
 		clear(@write_count);
 		clear(@write_exit);
 		clear(@write_fd);
